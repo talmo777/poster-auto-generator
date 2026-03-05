@@ -3,10 +3,10 @@ import { readRunLogs, readRowLogs, readErrors } from '@/lib/sheets-service';
 
 export async function GET(
     request: Request,
-    { params }: { params: { type: string } },
+    { params }: { params: Promise<{ type: string }> },
 ) {
     try {
-        const type = params.type;
+        const { type } = await params;
 
         if (type === 'runs') {
             const raw = await readRunLogs();
