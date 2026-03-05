@@ -1,0 +1,22 @@
+{
+    "name": "@poster/shared",
+    "version": "1.0.0",
+    "private": true,
+    "type": "module",
+    "main": "./dist/index.js",
+    "types": "./dist/index.d.ts",
+    "scripts": {
+        "build": "tsc",
+        "test": "vitest run",
+        "test:watch": "vitest"
+    },
+    "dependencies": {
+        "googleapis": "^144.0.0",
+        "@google/generative-ai": "^0.24.0"
+    },
+    "devDependencies": {
+        "typescript": "^5.7.0",
+        "vitest": "^3.0.0",
+        "@types/node": "^22.0.0"
+    }
+}

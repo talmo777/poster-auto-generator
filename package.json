@@ -1,0 +1,22 @@
+{
+  "name": "poster-auto-generator",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Google Sheets → Poster Auto-Generation System for 한양맞춤의약연구센터",
+  "workspaces": [
+    "packages/*",
+    "apps/*"
+  ],
+  "scripts": {
+    "build:shared": "npm run build -w packages/shared",
+    "build:worker": "npm run build -w packages/worker",
+    "build:ui": "npm run build -w apps/admin-ui",
+    "build": "npm run build:shared && npm run build:worker && npm run build:ui",
+    "dev:ui": "npm run dev -w apps/admin-ui",
+    "test": "npm test -w packages/shared",
+    "worker:run": "npm run start -w packages/worker"
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  }
+}
