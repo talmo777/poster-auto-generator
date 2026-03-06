@@ -29,6 +29,15 @@ jobs:
       - name: Install deps
         run: npm ci
 
+      - name: Debug - uuid import check
+        run: |
+          echo "=== logger.ts head ==="
+          sed -n '1,40p' packages/shared/src/logger.ts
+          echo "=== uuid imports under packages/shared/src ==="
+          grep -R "from 'uuid'" -n packages/shared/src || true
+          echo "=== uuid occurrences ==="
+          grep -R "uuid" -n packages/shared/src || true 
+
       # ✅ 여기: 워커는 dist/main.js를 돌리므로 빌드가 필요
       - name: Build shared + worker
         run: |
