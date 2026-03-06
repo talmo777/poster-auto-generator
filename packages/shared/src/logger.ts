@@ -4,7 +4,6 @@
  * 내부 시트의 run_logs, row_logs, errors 탭에 로그를 기록.
  */
 
-import { v4 as uuidv4 } from 'uuid';
 import type { sheets_v4 } from 'googleapis';
 import type { RunLog, RowLog, ErrorLog } from './types.js';
 import { appendRow } from './sheets-client.js';
