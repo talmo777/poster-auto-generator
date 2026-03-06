@@ -6,6 +6,7 @@
     "main": "./dist/index.js",
     "types": "./dist/index.d.ts",
     "scripts": {
+        "worker": "node ./scripts/worker.js",
         "build": "tsc",
         "test": "vitest run",
         "test:watch": "vitest"
