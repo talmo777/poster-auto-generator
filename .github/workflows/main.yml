@@ -1,0 +1,43 @@
+name: Poster Worker
+
+on:
+  schedule:
+    # GitHub Actions cron은 UTC 기준
+    # 예: 매주 월요일 00:00 UTC = KST 월요일 09:00
+    - cron: "0 0 * * 1"
+  workflow_dispatch: {}
+
+concurrency:
+  group: poster-worker
+  cancel-in-progress: false
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+
+      - name: Install deps
+        run: npm ci
+
+      - name: Run worker
+        env:
+          GOOGLE_SERVICE_ACCOUNT_KEY: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_KEY }}
+          INTERNAL_SHEET_ID: ${{ secrets.INTERNAL_SHEET_ID }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          # 필요 시 추가:
+          # DB_SHEET_ID: ${{ secrets.DB_SHEET_ID }}
+          # RESULT_SHEET_ID: ${{ secrets.RESULT_SHEET_ID }}
+          # DB_TAB: ${{ secrets.DB_TAB }}
+          # RESULT_TAB: ${{ secrets.RESULT_TAB }}
+        run: |
+          npm run worker
