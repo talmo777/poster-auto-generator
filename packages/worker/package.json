@@ -4,6 +4,7 @@
     "private": true,
     "type": "module",
     "scripts": {
+        "worker": "node ./scripts/worker.js",
         "build": "tsc",
         "start": "node dist/main.js",
         "test:integration": "vitest run --config vitest.integration.config.ts"
