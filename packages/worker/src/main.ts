@@ -31,7 +31,6 @@ import {
     logRow,
     logError,
     hashRowData,
-    decrypt,
     StateManager,
     PROMPT_VERSION,
 } from '@poster/shared';
@@ -64,9 +63,8 @@ async function main(): Promise<void> {
 
     // 1. 환경변수 로드
     const serviceAccountKey = getEnv('GOOGLE_SERVICE_ACCOUNT_KEY');
-    const encryptionKeyHex = getEnv('ENCRYPTION_KEY');
     const internalSheetId = getEnv('INTERNAL_SHEET_ID');
-    const encryptionKey = Buffer.from(encryptionKeyHex, 'hex');
+    const geminiApiKey = getEnv('GEMINI_API_KEY');
 
     // 2. 클라이언트 초기화
     const sheets = createSheetsClient(serviceAccountKey);
@@ -93,13 +91,6 @@ async function main(): Promise<void> {
         const config = configMapToAppConfig(configMap);
         config.internalSpreadsheetId = internalSheetId;
 
-        // Gemini API Key 복호화
-        let geminiApiKey: string;
-        try {
-            geminiApiKey = decrypt(config.geminiApiKeyEncrypted, encryptionKey);
-        } catch {
-            throw new Error('Failed to decrypt Gemini API key. Check ENCRYPTION_KEY.');
-        }
 
         // 설정 검증
         if (!config.dbSpreadsheetId || !config.dbSheetName) {
