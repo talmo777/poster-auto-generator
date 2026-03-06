@@ -12,13 +12,13 @@
         "test:watch": "vitest"
     },
     "dependencies": {
-        "googleapis": "^144.0.0",
-        "@google/generative-ai": "^0.24.0"
+        "@google/generative-ai": "^0.24.0",
+        "googleapis": "^144.0.0"
     },
     "devDependencies": {
-        "typescript": "^5.7.0",
-        "vitest": "^3.0.0",
         "@types/node": "^22.0.0",
-        "@types/uuid": "^9.0.0"
+        "@types/uuid": "^9.0.8",
+        "typescript": "^5.7.0",
+        "vitest": "^3.0.0"
     }
 }
