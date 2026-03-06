@@ -1,54 +1,44 @@
-name: Poster Auto-Generation Worker
+name: Poster Worker
 
 on:
   schedule:
-    # 매주 월요일 UTC 00:00 = KST 09:00
-    - cron: '0 0 * * 1'
-  workflow_dispatch:
-    inputs:
-      force_run:
-        description: 'Force run regardless of schedule'
-        required: false
-        type: boolean
-        default: false
+    # GitHub Actions cron은 UTC 기준
+    # 예: KST 월요일 09:00 = UTC 월요일 00:00
+    - cron: "0 0 * * 1"
+  workflow_dispatch: {}
 
-env:
-  GOOGLE_SERVICE_ACCOUNT_KEY: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_KEY }}
-  ENCRYPTION_KEY: ${{ secrets.ENCRYPTION_KEY }}
-  INTERNAL_SHEET_ID: ${{ secrets.INTERNAL_SHEET_ID }}
-
-# 동시 실행 방지
 concurrency:
   group: poster-worker
   cancel-in-progress: false
 
 jobs:
-  generate-posters:
+  run:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 20
 
     steps:
-      - name: Checkout repository
+      - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Setup Node.js
+      - name: Setup Node
         uses: actions/setup-node@v4
         with:
-          node-version: '20'
-          cache: 'npm'
+          node-version: "20"
+          cache: "npm"
 
-      - name: Install dependencies
+      - name: Install deps
         run: npm ci
 
-      - name: Build shared package
-        run: npm run build:shared
+      # ✅ 여기: 워커는 dist/main.js를 돌리므로 빌드가 필요
+      - name: Build shared + worker
+        run: |
+          npm run build:shared
+          npm run build:worker
 
-      - name: Build worker
-        run: npm run build:worker
-
-      - name: Run poster generation worker
-        run: npm run worker:run
+      # ✅ 여기: 실제 실행 커맨드 (너 레포에 이미 존재)
+      - name: Run worker
         env:
           GOOGLE_SERVICE_ACCOUNT_KEY: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_KEY }}
-          ENCRYPTION_KEY: ${{ secrets.ENCRYPTION_KEY }}
           INTERNAL_SHEET_ID: ${{ secrets.INTERNAL_SHEET_ID }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+        run: npm run worker:run
