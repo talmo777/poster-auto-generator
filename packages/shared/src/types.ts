@@ -93,6 +93,23 @@ export interface PosterCopy {
     supplementary: string;
 }
 
+export interface PosterMaterials {
+    headlineSource?: string;
+    equipmentName?: string;
+    description?: string;
+    priceInfo?: string;
+    contact?: string;
+    keywords?: string;
+    referenceImageUrl?: string;
+    location?: string;
+    availability?: string;
+    category?: string;
+    specification?: string;
+    manufacturer?: string;
+    modelNumber?: string;
+    bookingLink?: string;
+}
+
 export type TemplateLayout = 'centered' | 'split' | 'grid' | 'hero' | 'minimal' | 'diagonal';
 
 export interface PosterTemplate {
