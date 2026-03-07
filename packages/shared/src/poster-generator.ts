@@ -11,92 +11,83 @@ import { PROMPT_VERSION } from './copy-generator.js';
 
 const MAX_RETRIES = 2;
 
-/**
- * 랜덤 시드 생성 (추적용)
- */
 export function generateSeed(): number {
-    return Math.floor(Math.random() * 2147483647);
+  return Math.floor(Math.random() * 2147483647);
 }
 
-/**
- * 포스터 이미지 생성
- */
 export async function generatePoster(
-    copy: PosterCopy,
-    template: PosterTemplate,
-    geminiApiKey: string,
-    seed?: number,
+  copy: PosterCopy,
+  template: PosterTemplate,
+  geminiApiKey: string,
+  seed?: number,
 ): Promise<PosterResult> {
-    const actualSeed = seed ?? generateSeed();
+  const actualSeed = seed ?? generateSeed();
 
-    const genAI = new GoogleGenerativeAI(geminiApiKey);
-    const model = genAI.getGenerativeModel({
-        model: 'gemini-3.1-flash-image-preview',
-        generationConfig: {
-            // @ts-expect-error - responseModalities is supported but not in types
-            responseModalities: ['image', 'text'],
-        },
-    });
+  const genAI = new GoogleGenerativeAI(geminiApiKey);
+  const model = genAI.getGenerativeModel({
+    model: 'gemini-3.1-flash-image-preview',
+    generationConfig: {
+      // @ts-expect-error
+      responseModalities: ['image', 'text'],
+    },
+  });
 
-    const prompt = buildImagePrompt(copy, template, actualSeed);
+  const prompt = buildImagePrompt(copy, template, actualSeed);
 
-    let lastError: Error | null = null;
+  let lastError: Error | null = null;
 
-    for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
-        try {
-            const result = await model.generateContent(prompt);
-            const response = result.response;
-            const candidates = response.candidates;
+  for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+    try {
+      const result = await model.generateContent(prompt);
+      const response = result.response;
+      const candidates = response.candidates;
 
-            if (!candidates || candidates.length === 0) {
-                throw new Error('No candidates in response');
-            }
+      if (!candidates || candidates.length === 0) {
+        throw new Error('No candidates in response');
+      }
 
-            // 이미지 파트 추출
-            for (const part of candidates[0].content.parts) {
-                if (part.inlineData) {
-                    const imageBuffer = Buffer.from(part.inlineData.data!, 'base64');
-                    return {
-                        imageBuffer,
-                        copy,
-                        templateId: template.id,
-                        seed: actualSeed,
-                        promptVersion: PROMPT_VERSION,
-                    };
-                }
-            }
-
-            throw new Error('No image data in response');
-        } catch (error) {
-            lastError = error instanceof Error ? error : new Error(String(error));
-            console.warn(
-                `[PosterGenerator] Attempt ${attempt + 1}/${MAX_RETRIES + 1} failed: ${lastError.message}`
-            );
-
-            if (attempt < MAX_RETRIES) {
-                // 재시도 전 짧은 대기
-                await sleep(2000 * (attempt + 1));
-            }
+      for (const part of candidates[0].content.parts) {
+        if (part.inlineData) {
+          const imageBuffer = Buffer.from(part.inlineData.data!, 'base64');
+          return {
+            imageBuffer,
+            copy,
+            templateId: template.id,
+            seed: actualSeed,
+            promptVersion: PROMPT_VERSION,
+          };
         }
-    }
+      }
 
-    throw new Error(
-        `Poster generation failed after ${MAX_RETRIES + 1} attempts: ${lastError?.message}`
-    );
+      throw new Error('No image data in response');
+    } catch (error) {
+      lastError = error instanceof Error ? error : new Error(String(error));
+      console.warn(
+        `[PosterGenerator] Attempt ${attempt + 1}/${MAX_RETRIES + 1} failed: ${lastError.message}`,
+      );
+
+      if (attempt < MAX_RETRIES) {
+        await sleep(2000 * (attempt + 1));
+      }
+    }
+  }
+
+  throw new Error(
+    `Poster generation failed after ${MAX_RETRIES + 1} attempts: ${lastError?.message}`,
+  );
 }
 
 function buildImagePrompt(
-    copy: PosterCopy,
-    template: PosterTemplate,
-    seed: number,
+  copy: PosterCopy,
+  template: PosterTemplate,
+  seed: number,
 ): string {
-    const dimensions = template.aspectRatio === '4:5'
-        ? '1080x1350 pixels'
-        : '1080x1920 pixels';
+  const dimensions =
+    template.aspectRatio === '4:5' ? '1080x1350 pixels' : '1080x1920 pixels';
 
-    const bulletsText = copy.bullets.map((b, i) => `  ${i + 1}. ${b}`).join('\n');
+  const bulletsText = copy.bullets.map((b, i) => `  ${i + 1}. ${b}`).join('\n');
 
-    return `Generate a professional promotional poster image for a medical research equipment rental service.
+  return `Generate a professional promotional poster image for a medical research equipment rental service.
 
 DESIGN SPECIFICATIONS:
 - Dimensions: ${dimensions} (aspect ratio ${template.aspectRatio})
@@ -120,12 +111,12 @@ CRITICAL RULES:
 4. Typography must be clean and professional
 5. Do NOT include any text that is not listed above
 6. The poster should look like it was designed by a professional graphic designer
-7. Include subtle design elements (geometric shapes, gradients, icons) appropriate for medical/research context
+7. Include subtle design elements appropriate for medical/research context
 8. Random variation seed: ${seed}
 
 Generate the poster image now.`;
 }
 
 function sleep(ms: number): Promise<void> {
-    return new Promise(resolve => setTimeout(resolve, ms));
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
