@@ -1,12 +1,11 @@
 /**
  * Poster Generator
  *
- * Gemini 이미지 생성이 아니라, 실제 데이터 기반으로
- * 코드 렌더링(Sharp + SVG + QR) 방식의 포스터를 생성한다.
+ * 코드 렌더링 기반 포스터 생성
  * - 실제 이미지 URL 사용
- * - 홈페이지 URL -> QR 사용
- * - 텍스트 잘림 방지
- * - 포스터 품질 안정화
+ * - bookingLink -> QR 삽입
+ * - SVG UTF-8 렌더 안정화
+ * - QR 가시성 보정
  */
 
 import sharp from 'sharp';
@@ -20,6 +19,10 @@ import type {
 import { PROMPT_VERSION } from './copy-generator.js';
 
 const IMAGE_FETCH_TIMEOUT_MS = 12000;
+const QR_DARK_COLOR = '#0F172A';
+const QR_LIGHT_COLOR = '#FFFFFFFF';
+const FONT_STACK =
+  "'Noto Sans KR', 'Apple SD Gothic Neo', 'Malgun Gothic', 'NanumGothic', sans-serif";
 
 export function generateSeed(): number {
   return Math.floor(Math.random() * 2147483647);
@@ -53,8 +56,8 @@ export async function generatePoster(
         margin: 1,
         width: qrArea.size,
         color: {
-          dark: template.colorScheme.text,
-          light: '#FFFFFFFF',
+          dark: QR_DARK_COLOR,
+          light: QR_LIGHT_COLOR,
         },
       })
     : null;
@@ -71,13 +74,13 @@ export async function generatePoster(
   const composites: sharp.OverlayOptions[] = [];
 
   composites.push({
-    input: Buffer.from(buildBackgroundSvg(width, height, template)),
+    input: svgToBuffer(buildBackgroundSvg(width, height, template)),
     top: 0,
     left: 0,
   });
 
   composites.push({
-    input: Buffer.from(buildRoundedRectSvg(heroArea.width, heroArea.height, 36, '#FFFFFF12')),
+    input: svgToBuffer(buildRoundedRectSvg(heroArea.width, heroArea.height, 36, '#FFFFFF12')),
     top: heroArea.top - 8,
     left: heroArea.left - 8,
   });
@@ -89,7 +92,7 @@ export async function generatePoster(
   });
 
   composites.push({
-    input: Buffer.from(
+    input: svgToBuffer(
       buildGradientOverlaySvg(heroArea.width, heroArea.height, 32, [
         { offset: '0%', color: '#00000000' },
         { offset: '70%', color: '#0000001A' },
@@ -101,7 +104,7 @@ export async function generatePoster(
   });
 
   composites.push({
-    input: Buffer.from(
+    input: svgToBuffer(
       buildRoundedRectSvg(
         panelArea.width,
         panelArea.height,
@@ -115,7 +118,7 @@ export async function generatePoster(
   });
 
   composites.push({
-    input: Buffer.from(
+    input: svgToBuffer(
       buildPosterTextSvg(width, height, copy, materials, template, {
         heroArea,
         panelArea,
@@ -198,7 +201,7 @@ async function buildHeroImage(
   })
     .composite([
       {
-        input: Buffer.from(buildFallbackHeroSvg(width, height, template)),
+        input: svgToBuffer(buildFallbackHeroSvg(width, height, template)),
         top: 0,
         left: 0,
       },
@@ -226,7 +229,7 @@ async function buildHeroImage(
       })
       .composite([
         {
-          input: Buffer.from(buildRoundedMaskSvg(width, height, 28)),
+          input: svgToBuffer(buildRoundedMaskSvg(width, height, 28)),
           blend: 'dest-in',
         },
       ])
@@ -280,9 +283,7 @@ function buildPosterTextSvg(
   const qrSubtitle = layout.hasQr
     ? 'QR 스캔 후 상세 정보 확인'
     : '홈페이지 URL 미연결';
-  const footerTag = layout.hasQr
-    ? 'ONLINE BOOKING'
-    : 'INQUIRY AVAILABLE';
+  const footerTag = layout.hasQr ? 'ONLINE BOOKING' : 'INQUIRY AVAILABLE';
 
   const headlineSvg = renderLines(headlineLines, {
     x: 72,
@@ -317,13 +318,13 @@ function buildPosterTextSvg(
       return `
         <circle cx="98" cy="${bulletY - 6}" r="8" fill="${template.colorScheme.accent}" />
         <text x="120" y="${bulletY}" font-size="28" font-weight="700" fill="#FFFFFF"
-          font-family="Pretendard, Noto Sans KR, Apple SD Gothic Neo, Malgun Gothic, sans-serif">${escapeXml(item)}</text>
+          font-family="${FONT_STACK}">${escapeXml(item)}</text>
       `;
     })
     .join('');
 
-  return `
-  <svg width="${width}" height="${height}" xmlns="http://www.w3.org/2000/svg">
+  return withSvgDocument(`
+  <svg width="${width}" height="${height}" xmlns="http://www.w3.org/2000/svg" lang="ko">
     <defs>
       <filter id="softShadow" x="-20%" y="-20%" width="140%" height="140%">
         <feDropShadow dx="0" dy="10" stdDeviation="16" flood-color="#000000" flood-opacity="0.22"/>
@@ -332,14 +333,14 @@ function buildPosterTextSvg(
 
     <text x="72" y="44" font-size="18" font-weight="700" letter-spacing="3"
       fill="${template.colorScheme.accent}"
-      font-family="Pretendard, Noto Sans KR, Apple SD Gothic Neo, Malgun Gothic, sans-serif">${escapeXml(footerTag)}</text>
+      font-family="${FONT_STACK}">${escapeXml(footerTag)}</text>
 
     ${headlineSvg}
     ${subheadlineSvg}
 
     <text x="72" y="${layout.heroArea.top - 22}" font-size="18" font-weight="700" letter-spacing="2"
       fill="${addAlpha(template.colorScheme.text, 0.8)}"
-      font-family="Pretendard, Noto Sans KR, Apple SD Gothic Neo, Malgun Gothic, sans-serif">${brandLine}</text>
+      font-family="${FONT_STACK}">${brandLine}</text>
 
     ${
       specLine
@@ -349,13 +350,13 @@ function buildPosterTextSvg(
           )}" height="40" fill="#FFFFFFD9" filter="url(#softShadow)" />
            <text x="92" y="${layout.heroArea.top + layout.heroArea.height - 33}" font-size="20" font-weight="700"
              fill="${template.colorScheme.primary}"
-             font-family="Pretendard, Noto Sans KR, Apple SD Gothic Neo, Malgun Gothic, sans-serif">${specLine}</text>`
+             font-family="${FONT_STACK}">${specLine}</text>`
         : ''
     }
 
     <text x="84" y="${layout.panelArea.top + 28}" font-size="20" font-weight="700" letter-spacing="2"
       fill="${addAlpha('#FFFFFF', 0.82)}"
-      font-family="Pretendard, Noto Sans KR, Apple SD Gothic Neo, Malgun Gothic, sans-serif">KEY BENEFITS</text>
+      font-family="${FONT_STACK}">KEY BENEFITS</text>
 
     ${bulletSvg}
     ${supplementarySvg}
@@ -364,36 +365,36 @@ function buildPosterTextSvg(
       template.colorScheme.text,
       0.88,
     )}"
-      font-family="Pretendard, Noto Sans KR, Apple SD Gothic Neo, Malgun Gothic, sans-serif">${escapeXml(locationLine)}</text>
+      font-family="${FONT_STACK}">${escapeXml(locationLine)}</text>
 
     <text x="72" y="${height - 132}" font-size="19" font-weight="600" fill="${addAlpha(
       template.colorScheme.text,
       0.82,
     )}"
-      font-family="Pretendard, Noto Sans KR, Apple SD Gothic Neo, Malgun Gothic, sans-serif">${escapeXml(contactLine)}</text>
+      font-family="${FONT_STACK}">${escapeXml(contactLine)}</text>
 
     <text x="72" y="${height - 98}" font-size="19" font-weight="600" fill="${addAlpha(
       template.colorScheme.text,
       0.82,
     )}"
-      font-family="Pretendard, Noto Sans KR, Apple SD Gothic Neo, Malgun Gothic, sans-serif">${escapeXml(priceLine)}</text>
+      font-family="${FONT_STACK}">${escapeXml(priceLine)}</text>
 
     <rect x="${layout.qrArea.left - 20}" y="${layout.qrArea.top - 20}" rx="24" ry="24" width="${
       layout.qrArea.size + 40
     }" height="${layout.qrArea.size + 40}" fill="#FFFFFFF0" />
     <text x="${layout.qrArea.left - 6}" y="${layout.qrArea.top - 36}" font-size="24" font-weight="800"
       fill="${template.colorScheme.text}"
-      font-family="Pretendard, Noto Sans KR, Apple SD Gothic Neo, Malgun Gothic, sans-serif">${qrTitle}</text>
+      font-family="${FONT_STACK}">${qrTitle}</text>
     <text x="${layout.qrArea.left - 6}" y="${layout.qrArea.top - 10}" font-size="16" font-weight="600"
       fill="${addAlpha(template.colorScheme.text, 0.72)}"
-      font-family="Pretendard, Noto Sans KR, Apple SD Gothic Neo, Malgun Gothic, sans-serif">${qrSubtitle}</text>
+      font-family="${FONT_STACK}">${qrSubtitle}</text>
   </svg>
-  `;
+  `);
 }
 
 function buildBackgroundSvg(width: number, height: number, template: PosterTemplate): string {
-  return `
-  <svg width="${width}" height="${height}" xmlns="http://www.w3.org/2000/svg">
+  return withSvgDocument(`
+  <svg width="${width}" height="${height}" xmlns="http://www.w3.org/2000/svg" lang="ko">
     <defs>
       <linearGradient id="bgGradient" x1="0" y1="0" x2="1" y2="1">
         <stop offset="0%" stop-color="${template.colorScheme.background}" />
@@ -422,15 +423,15 @@ function buildBackgroundSvg(width: number, height: number, template: PosterTempl
     <circle cx="98" cy="${height - 92}" r="34" fill="${addAlpha(template.colorScheme.text, 0.05)}" />
     <circle cx="98" cy="${height - 92}" r="12" fill="${addAlpha(template.colorScheme.text, 0.08)}" />
   </svg>
-  `;
+  `);
 }
 
 function buildFallbackHeroSvg(width: number, height: number, template: PosterTemplate): string {
   const iconX = width / 2;
   const iconY = height / 2;
 
-  return `
-  <svg width="${width}" height="${height}" xmlns="http://www.w3.org/2000/svg">
+  return withSvgDocument(`
+  <svg width="${width}" height="${height}" xmlns="http://www.w3.org/2000/svg" lang="ko">
     <defs>
       <linearGradient id="heroGradient" x1="0" y1="0" x2="1" y2="1">
         <stop offset="0%" stop-color="${addAlpha(template.colorScheme.secondary, 0.92)}"/>
@@ -443,9 +444,9 @@ function buildFallbackHeroSvg(width: number, height: number, template: PosterTem
     <rect x="${iconX - 26}" y="${iconY - 124}" rx="8" ry="8" width="52" height="52" fill="#FFFFFF24"/>
     <text x="${iconX}" y="${height - 56}" text-anchor="middle" font-size="28" font-weight="800"
       fill="#FFFFFF"
-      font-family="Pretendard, Noto Sans KR, Apple SD Gothic Neo, Malgun Gothic, sans-serif">REFERENCE IMAGE PREVIEW</text>
+      font-family="${FONT_STACK}">REFERENCE IMAGE PREVIEW</text>
   </svg>
-  `;
+  `);
 }
 
 function buildRoundedRectSvg(
@@ -455,12 +456,12 @@ function buildRoundedRectSvg(
   fill: string,
   stroke = '#FFFFFF10',
 ): string {
-  return `
+  return withSvgDocument(`
   <svg width="${width}" height="${height}" xmlns="http://www.w3.org/2000/svg">
     <rect x="0" y="0" width="${width}" height="${height}" rx="${radius}" ry="${radius}"
       fill="${fill}" stroke="${stroke}" stroke-width="2" />
   </svg>
-  `;
+  `);
 }
 
 function buildGradientOverlaySvg(
@@ -473,7 +474,7 @@ function buildGradientOverlaySvg(
     .map((stop) => `<stop offset="${stop.offset}" stop-color="${stop.color}" />`)
     .join('');
 
-  return `
+  return withSvgDocument(`
   <svg width="${width}" height="${height}" xmlns="http://www.w3.org/2000/svg">
     <defs>
       <linearGradient id="heroOverlay" x1="0" y1="0" x2="0" y2="1">
@@ -482,15 +483,15 @@ function buildGradientOverlaySvg(
     </defs>
     <rect x="0" y="0" width="${width}" height="${height}" rx="${radius}" ry="${radius}" fill="url(#heroOverlay)"/>
   </svg>
-  `;
+  `);
 }
 
 function buildRoundedMaskSvg(width: number, height: number, radius: number): string {
-  return `
+  return withSvgDocument(`
   <svg width="${width}" height="${height}" xmlns="http://www.w3.org/2000/svg">
     <rect x="0" y="0" width="${width}" height="${height}" rx="${radius}" ry="${radius}" fill="#FFFFFF"/>
   </svg>
-  `;
+  `);
 }
 
 function renderLines(
@@ -509,9 +510,7 @@ function renderLines(
       const y = options.y + index * options.lineHeight;
       return `<text x="${options.x}" y="${y}" font-size="${options.fontSize}" font-weight="${options.weight}"
         fill="${options.fill}"
-        font-family="Pretendard, Noto Sans KR, Apple SD Gothic Neo, Malgun Gothic, sans-serif">${escapeXml(
-          line,
-        )}</text>`;
+        font-family="${FONT_STACK}">${escapeXml(line)}</text>`;
     })
     .join('');
 }
@@ -549,12 +548,7 @@ function wrapText(input: string, maxCharsPerLine: number, maxLines: number): str
     lines.push(current);
   }
 
-  return lines.slice(0, maxLines).map((line, index, arr) => {
-    if (index === arr.length - 1) {
-      return line;
-    }
-    return line.trim();
-  });
+  return lines.slice(0, maxLines).map((line) => line.trim());
 }
 
 function normalizeFooterLine(values: Array<string | undefined>): string {
@@ -615,6 +609,14 @@ function escapeXml(value: string): string {
     .replace(/>/g, '&gt;');
 }
 
+function withSvgDocument(svgBody: string): string {
+  return `<?xml version="1.0" encoding="UTF-8"?>${svgBody}`;
+}
+
+function svgToBuffer(svg: string): Buffer {
+  return Buffer.from(`\uFEFF${svg}`, 'utf8');
+}
+
 async function fetchWithTimeout(url: string, timeoutMs: number): Promise<Response> {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), timeoutMs);
@@ -623,7 +625,7 @@ async function fetchWithTimeout(url: string, timeoutMs: number): Promise<Respons
     return await fetch(url, {
       signal: controller.signal,
       headers: {
-        'User-Agent': 'poster-auto-generator/2.0',
+        'User-Agent': 'poster-auto-generator/2.1',
       },
     });
   } finally {
