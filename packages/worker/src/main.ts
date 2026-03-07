@@ -5,14 +5,13 @@
  * 1. 내부 시트에서 config/state 로드
  * 2. 락 획득 (실패 시 즉시 종료)
  * 3. DB/결과 시트 헤더 변경 감지
- * 4. 배치 단위 포스터 생성 → Drive 업로드 → 결과 시트 기록(append-only)
+ * 4. 배치 단위 포스터 생성 → Cloudinary 업로드 → 결과 시트 기록(append-only)
  * 5. state 업데이트 + 로그 기록
  * 6. 락 해제
  */
 
 import {
   createSheetsClient,
-  createDriveClient,
   readHeaders,
   readRows,
   getLastDataRow,
@@ -25,7 +24,6 @@ import {
   POSTER_TEMPLATES,
   generateCopy,
   generatePoster,
-  uploadImage,
   logRun,
   logRow,
   logError,
@@ -35,6 +33,7 @@ import {
 } from '@poster/shared';
 
 import type { SemanticMapping, ResultMappingConfig } from '@poster/shared';
+import { uploadPosterToCloudinary } from './cloudinary-upload.js';
 
 // ============================================================
 // Environment
@@ -63,13 +62,6 @@ function columnLetter(col1Based: number): string {
   return letter;
 }
 
-/**
- * 결과 시트에서 "이번에 실제로 쓰는 컬럼 중 가장 왼쪽(anchor)" 컬럼을 기준으로
- * 마지막 데이터 행을 찾아 다음 빈 행 번호(1-based)를 반환.
- *
- * - 1행은 헤더로 가정
- * - anchor 컬럼에는 항상 값을 쓰므로, 이 컬럼 기준 탐색이 가장 안정적
- */
 async function getNextAppendRowByColumn(
   sheets: ReturnType<typeof createSheetsClient>,
   spreadsheetId: string,
@@ -85,21 +77,16 @@ async function getNextAppendRowByColumn(
   const values = res.data.values || [];
   let lastSheetRowWithData = 1; // 헤더 행
 
-  // values[0] = 헤더, values[1]부터 데이터 행
   for (let i = 1; i < values.length; i++) {
     const v = values[i]?.[0];
     if (v !== undefined && v !== null && String(v).trim() !== '') {
-      lastSheetRowWithData = i + 1; // array index -> sheet row
+      lastSheetRowWithData = i + 1;
     }
   }
 
   return lastSheetRowWithData + 1;
 }
 
-/**
- * row_logs에서 행별 생성 횟수 집계
- * - range "'row_logs'!B:D" 전제: B=rowIndex, D=status (기존 코드 유지)
- */
 async function getRowGenerationCounts(
   sheets: ReturnType<typeof createSheetsClient>,
   spreadsheetId: string,
@@ -107,7 +94,7 @@ async function getRowGenerationCounts(
   try {
     const res = await sheets.spreadsheets.values.get({
       spreadsheetId,
-      range: "'row_logs'!B:D", // rowIndex, dbRowHash, status
+      range: "'row_logs'!B:D",
     });
     const rows = res.data.values || [];
     const counts = new Map<number, number>();
@@ -125,14 +112,6 @@ async function getRowGenerationCounts(
   }
 }
 
-/**
- * 결과 시트에 결과 저장 (2단계 전략)
- * - distributed: 여러 컬럼에 분산 기록
- * - json_package: 단일 컬럼에 JSON blob 기록
- *
- * ※ append-only: targetRow를 외부에서 받지 않고, 내부에서 다음 빈 행을 계산.
- * @returns 실제로 기록한 sheet row (1-based). 기록이 없으면 -1
- */
 async function writeResultToSheet(
   sheets: ReturnType<typeof createSheetsClient>,
   spreadsheetId: string,
@@ -214,13 +193,16 @@ async function main(): Promise<void> {
   const startedAt = new Date().toISOString();
   console.log(`[Worker] Starting at ${startedAt}`);
 
-  // A안: GEMINI_API_KEY env 직접 사용
   const serviceAccountKey = getEnv('GOOGLE_SERVICE_ACCOUNT_KEY');
   const internalSheetId = getEnv('INTERNAL_SHEET_ID');
   const geminiApiKey = getEnv('GEMINI_API_KEY');
 
+  // Cloudinary env 존재 여부를 시작 시점에 미리 확인
+  getEnv('CLOUDINARY_CLOUD_NAME');
+  getEnv('CLOUDINARY_API_KEY');
+  getEnv('CLOUDINARY_API_SECRET');
+
   const sheets = createSheetsClient(serviceAccountKey);
-  const drive = createDriveClient(serviceAccountKey);
   const stateManager = new StateManager(sheets, internalSheetId);
 
   const lockAcquired = await stateManager.acquireLock();
@@ -239,7 +221,6 @@ async function main(): Promise<void> {
   const runId = `run_${Date.now()}`;
 
   try {
-    // 설정 로드
     const configMap = await readConfigMap(sheets, internalSheetId);
     const config = configMapToAppConfig(configMap);
     config.internalSpreadsheetId = internalSheetId;
@@ -254,34 +235,27 @@ async function main(): Promise<void> {
         'Result sheet not configured. Set result_spreadsheet_id and result_sheet_name in config.',
       );
     }
-    if (!config.driveFolderId) {
-      throw new Error('Drive folder not configured. Set drive_folder_id in config.');
-    }
 
     // ============================================================
-    // ✅ 헤더 해시 처리 로직 (여기가 문제 해결 포인트)
-    // - 최초 실행(저장된 hash 없음): hash 저장 후 계속 진행
-    // - 실제 변경(저장된 hash 있음 + 다름): remapping_needed=true + 중단
+    // 헤더 해시 처리
+    // - 최초 실행: hash 저장 후 진행
+    // - 이후 실제 변경: remapping 필요 상태로 전환 후 중단
     // ============================================================
 
-    // DB 헤더
     const dbHeaders = await readHeaders(sheets, config.dbSpreadsheetId, config.dbSheetName);
     const dbHeaderHash = computeHeaderHash(dbHeaders);
 
     if (!config.dbHeaderHash) {
-      // 최초 실행: 저장만 하고 진행
       console.log('[Worker] DB header hash not set. Initializing db_header_hash and continuing.');
       await writeConfigValue(sheets, internalSheetId, 'db_header_hash', dbHeaderHash);
       await writeConfigValue(sheets, internalSheetId, 'header_remapping_needed', 'false');
     } else if (dbHeaderHash !== config.dbHeaderHash) {
-      // 실제 변경: remapping 필요
       console.warn('[Worker] DB sheet headers changed! Requires re-mapping in Admin UI.');
       await writeConfigValue(sheets, internalSheetId, 'db_header_hash', dbHeaderHash);
       await writeConfigValue(sheets, internalSheetId, 'header_remapping_needed', 'true');
       throw new Error('DB sheet headers changed. Re-mapping required via Admin UI.');
     }
 
-    // 결과 시트 헤더
     const resultHeaders = await readHeaders(
       sheets,
       config.resultSpreadsheetId,
@@ -302,7 +276,6 @@ async function main(): Promise<void> {
       throw new Error('Result sheet headers changed. Re-mapping required via Admin UI.');
     }
 
-    // 매핑 로드
     let dbMappings: SemanticMapping[];
     let resultMappingConfig: ResultMappingConfig;
     try {
@@ -318,7 +291,6 @@ async function main(): Promise<void> {
       throw new Error('Header mappings are empty. Complete mapping in Admin UI.');
     }
 
-    // 상태 로드 + 배치 계산
     const state = await stateManager.getState();
     const totalRows = await getLastDataRow(sheets, config.dbSpreadsheetId, config.dbSheetName);
 
@@ -338,7 +310,6 @@ async function main(): Promise<void> {
       return;
     }
 
-    // 행 읽기
     const { rows } = await readRows(
       sheets,
       config.dbSpreadsheetId,
@@ -347,10 +318,8 @@ async function main(): Promise<void> {
       batch.endRow - batch.startRow + 1,
     );
 
-    // 행별 생성 횟수 조회
     const rowGenCounts = await getRowGenerationCounts(sheets, internalSheetId);
 
-    // 각 행 처리
     for (let i = 0; i < rows.length; i++) {
       const rowIndex = batch.startRow + i;
       const row = rows[i];
@@ -394,15 +363,13 @@ async function main(): Promise<void> {
         const posterResult = await generatePoster(copy, template, geminiApiKey);
 
         const fileName = `poster_row${rowIndex}_cycle${state.cycleNumber}_${Date.now()}.png`;
-        console.log(`[Worker] Row ${rowIndex}: Uploading to Drive as "${fileName}"...`);
-        const uploadResult = await uploadImage(
-          drive,
-          config.driveFolderId,
-          fileName,
+
+        console.log(`[Worker] Row ${rowIndex}: Uploading to Cloudinary as "${fileName}"...`);
+        const uploadResult = await uploadPosterToCloudinary(
           posterResult.imageBuffer,
+          fileName,
         );
 
-        // 결과 시트 기록(append-only)
         await writeResultToSheet(
           sheets,
           config.resultSpreadsheetId,
@@ -410,14 +377,15 @@ async function main(): Promise<void> {
           resultHeaders,
           resultMappingConfig,
           {
-            posterUrl: uploadResult.webViewLink,
+            posterUrl: uploadResult.secureUrl,
             headlineUsed: copy.headline,
             summary: copy.subheadline,
             generationDate: new Date().toISOString(),
             templateId: template.id,
             allData: {
-              posterUrl: uploadResult.webViewLink,
-              driveFileId: uploadResult.fileId,
+              posterUrl: uploadResult.secureUrl,
+              cloudinaryPublicId: uploadResult.publicId,
+              cloudinaryAssetId: uploadResult.assetId,
               headline: copy.headline,
               subheadline: copy.subheadline,
               bullets: copy.bullets,
@@ -438,8 +406,8 @@ async function main(): Promise<void> {
           templateId: template.id,
           seed: posterResult.seed,
           promptVersion: PROMPT_VERSION,
-          posterUrl: uploadResult.webViewLink,
-          driveFileId: uploadResult.fileId,
+          posterUrl: uploadResult.secureUrl,
+          driveFileId: uploadResult.publicId, // 기존 필드 재사용
           retryCount: 0,
           errorMessage: '',
           createdAt: new Date().toISOString(),
@@ -478,7 +446,6 @@ async function main(): Promise<void> {
       }
     }
 
-    // 포인터 전진
     await stateManager.advancePointer(rows.length, totalRows, state);
 
     runStatus = rowsFailed === 0 ? 'success' : rowsSuccess > 0 ? 'partial' : 'failed';
