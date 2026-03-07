@@ -51,3 +51,5 @@ jobs:
           INTERNAL_SHEET_ID: ${{ secrets.INTERNAL_SHEET_ID }}
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
         run: npm run worker:run
+
+      
