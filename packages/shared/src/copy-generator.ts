@@ -26,7 +26,7 @@ export async function generateCopy(
     const materials = extractPosterMaterials(rowData, mappings);
 
     const genAI = new GoogleGenerativeAI(geminiApiKey);
-    const model = genAI.getGenerativeModel({ model: 'gemini-3.0-flash' });
+    const model = genAI.getGenerativeModel({ model: 'gemini-3-flash-preview' });
 
     const prompt = buildCopyPrompt(materials, fixedMessage, template);
     const result = await model.generateContent(prompt);

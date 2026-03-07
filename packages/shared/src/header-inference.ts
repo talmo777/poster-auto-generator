@@ -81,7 +81,7 @@ export async function inferDbMapping(
     geminiApiKey: string,
 ): Promise<SemanticMapping[]> {
     const genAI = new GoogleGenerativeAI(geminiApiKey);
-    const model = genAI.getGenerativeModel({ model: 'gemini-3.0-flash' });
+    const model = genAI.getGenerativeModel({ model: 'gemini-3-flash-preview' });
 
     const slotDescriptions = DB_SEMANTIC_SLOTS
         .map(s => `  - "${s.slot}": ${s.description}`)
@@ -137,7 +137,7 @@ export async function inferResultMapping(
     geminiApiKey: string,
 ): Promise<ResultMappingConfig> {
     const genAI = new GoogleGenerativeAI(geminiApiKey);
-    const model = genAI.getGenerativeModel({ model: 'gemini-3.0-flash' });
+    const model = genAI.getGenerativeModel({ model: 'gemini-3-flash-preview' });
 
     const slotDescriptions = RESULT_SEMANTIC_SLOTS
         .map(s => `  - "${s.slot}": ${s.description}`)

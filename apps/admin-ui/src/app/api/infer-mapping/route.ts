@@ -71,7 +71,7 @@ export async function POST(request: NextRequest) {
 
     // 모델명은 환경/계정에 따라 막히면 gemini-1.5-flash로 내려도 됨
     const model = genAI.getGenerativeModel({
-      model: 'gemini-3.0-flash',
+      model: 'gemini-3-flash-preview',
       generationConfig: {
         responseMimeType: 'application/json',
         temperature: 0.3,
