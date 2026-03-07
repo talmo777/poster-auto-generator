@@ -1,24 +1,27 @@
 {
-    "name": "@poster/shared",
-    "version": "1.0.0",
-    "private": true,
-    "type": "module",
-    "main": "./dist/index.js",
-    "types": "./dist/index.d.ts",
-    "scripts": {
-        "worker": "node ./scripts/worker.js",
-        "build": "tsc",
-        "test": "vitest run",
-        "test:watch": "vitest"
-    },
-    "dependencies": {
-        "@google/generative-ai": "^0.24.0",
-        "googleapis": "^144.0.0"
-    },
-    "devDependencies": {
-        "@types/node": "^22.0.0",
-        "@types/uuid": "^9.0.8",
-        "typescript": "^5.7.0",
-        "vitest": "^3.0.0"
-    }
+  "name": "@poster/shared",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "scripts": {
+    "worker": "node ./scripts/worker.js",
+    "build": "tsc",
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "dependencies": {
+    "@google/generative-ai": "^0.24.0",
+    "googleapis": "^144.0.0",
+    "qrcode": "^1.5.4",
+    "sharp": "^0.33.5"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "@types/qrcode": "^1.5.5",
+    "@types/uuid": "^9.0.8",
+    "typescript": "^5.7.0",
+    "vitest": "^3.0.0"
+  }
 }
