@@ -31,7 +31,7 @@ export async function generatePoster(
 
     const genAI = new GoogleGenerativeAI(geminiApiKey);
     const model = genAI.getGenerativeModel({
-        model: 'gemini-3-flash-preview',
+        model: 'gemini-3.1-flash-image-preview',
         generationConfig: {
             // @ts-expect-error - responseModalities is supported but not in types
             responseModalities: ['image', 'text'],
