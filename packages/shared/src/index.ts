@@ -13,6 +13,7 @@ export type {
     ResultSaveStrategy,
     ResultMappingConfig,
     PosterCopy,
+    PosterMaterials,
     TemplateLayout,
     PosterTemplate,
     PosterResult,
