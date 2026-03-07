@@ -30,9 +30,10 @@ import {
   hashRowData,
   StateManager,
   PROMPT_VERSION,
+  extractPosterMaterials,
 } from '@poster/shared';
 
-import type { SemanticMapping, ResultMappingConfig } from '@poster/shared';
+import type { PosterMaterials, SemanticMapping, ResultMappingConfig } from '@poster/shared';
 import { uploadPosterToCloudinary } from './cloudinary-upload.js';
 
 // ============================================================
@@ -183,6 +184,25 @@ async function writeResultToSheet(
 
   await writeCells(sheets, spreadsheetId, sheetName, targetRow, colValuePairs);
   return targetRow;
+}
+
+function normalizePosterMaterials(raw: Record<string, string>): PosterMaterials {
+  return {
+    headlineSource: raw.headline_source || '',
+    equipmentName: raw.equipment_name || '',
+    description: raw.description || '',
+    priceInfo: raw.price_info || '',
+    contact: raw.contact || '',
+    keywords: raw.keywords || '',
+    referenceImageUrl: raw.reference_image_url || '',
+    location: raw.location || '',
+    availability: raw.availability || '',
+    category: raw.category || '',
+    specification: raw.specification || '',
+    manufacturer: raw.manufacturer || '',
+    modelNumber: raw.model_number || '',
+    bookingLink: raw.booking_link || '',
+  };
 }
 
 // ============================================================
@@ -350,6 +370,9 @@ async function main(): Promise<void> {
       const template = selectTemplate(rowGenCount, POSTER_TEMPLATES);
 
       try {
+        const extracted = extractPosterMaterials(row, dbMappings);
+        const materials = normalizePosterMaterials(extracted);
+
         console.log(`[Worker] Row ${rowIndex}: Generating copy with template "${template.name}"...`);
         const copy = await generateCopy(
           row,
@@ -359,8 +382,8 @@ async function main(): Promise<void> {
           geminiApiKey,
         );
 
-        console.log(`[Worker] Row ${rowIndex}: Generating poster image...`);
-        const posterResult = await generatePoster(copy, template, geminiApiKey);
+        console.log(`[Worker] Row ${rowIndex}: Rendering poster image...`);
+        const posterResult = await generatePoster(copy, template, materials, geminiApiKey);
 
         const fileName = `poster_row${rowIndex}_cycle${state.cycleNumber}_${Date.now()}.png`;
 
@@ -390,10 +413,17 @@ async function main(): Promise<void> {
               subheadline: copy.subheadline,
               bullets: copy.bullets,
               cta: copy.cta,
+              supplementary: copy.supplementary,
               templateId: template.id,
               seed: posterResult.seed,
               promptVersion: PROMPT_VERSION,
               generatedAt: new Date().toISOString(),
+              referenceImageUrl: materials.referenceImageUrl || '',
+              bookingLink: materials.bookingLink || '',
+              equipmentName: materials.equipmentName || '',
+              location: materials.location || '',
+              contact: materials.contact || '',
+              priceInfo: materials.priceInfo || '',
             },
           },
         );
