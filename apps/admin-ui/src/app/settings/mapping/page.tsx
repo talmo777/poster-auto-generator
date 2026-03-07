@@ -93,6 +93,10 @@ export default function MappingPage() {
                 body: JSON.stringify({ headers, type: tab }),
             });
             const result = await res.json();
+            if (!res.ok) {
+                setMessage(`❌ 추론 실패: ${result.error || res.statusText}`);
+                return;
+            }
             if (tab === 'db') {
                 setMappings((result as MappingItem[]).map(m => ({ ...m, isConfirmed: false })));
             } else {

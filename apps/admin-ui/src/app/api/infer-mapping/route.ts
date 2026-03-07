@@ -106,6 +106,7 @@ export async function POST(request: NextRequest) {
 
     return NextResponse.json(parsed);
   } catch (error) {
+    console.error('[infer-mapping] Error:', error);
     return NextResponse.json(
       { error: error instanceof Error ? error.message : 'Inference failed' },
       { status: 500 },
