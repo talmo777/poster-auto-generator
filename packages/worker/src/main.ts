@@ -20,7 +20,6 @@ import {
   configMapToAppConfig,
   writeCells,
   computeHeaderHash,
-  detectHeaderChange,
   writeConfigValue,
   selectTemplate,
   POSTER_TEMPLATES,
@@ -152,7 +151,6 @@ async function writeResultToSheet(
   const colValuePairs: { col: number; value: string }[] = [];
 
   if (mappingConfig.strategy === 'distributed') {
-    // 전략 1: 분산 저장
     for (const mapping of mappingConfig.mappings) {
       const slot = mapping.confirmedSlot || mapping.inferredSlot;
       if (slot === 'unmapped') continue;
@@ -183,7 +181,6 @@ async function writeResultToSheet(
       }
     }
   } else if (mappingConfig.strategy === 'json_package') {
-    // 전략 2: JSON 패키지
     const jsonCol = mappingConfig.mappings.find(
       (m) => (m.confirmedSlot || m.inferredSlot) === 'json_package',
     );
@@ -217,17 +214,15 @@ async function main(): Promise<void> {
   const startedAt = new Date().toISOString();
   console.log(`[Worker] Starting at ${startedAt}`);
 
-  // 1. 환경변수 로드 (A안: GEMINI_API_KEY env 직접 사용)
+  // A안: GEMINI_API_KEY env 직접 사용
   const serviceAccountKey = getEnv('GOOGLE_SERVICE_ACCOUNT_KEY');
   const internalSheetId = getEnv('INTERNAL_SHEET_ID');
   const geminiApiKey = getEnv('GEMINI_API_KEY');
 
-  // 2. 클라이언트 초기화
   const sheets = createSheetsClient(serviceAccountKey);
   const drive = createDriveClient(serviceAccountKey);
   const stateManager = new StateManager(sheets, internalSheetId);
 
-  // 3. 락 획득
   const lockAcquired = await stateManager.acquireLock();
   if (!lockAcquired) {
     console.log('[Worker] Another instance is running. Exiting.');
@@ -241,16 +236,14 @@ async function main(): Promise<void> {
   let batchRange = '';
   let errorSummary = '';
 
-  // runId를 try 밖에서 선언해두면 fatal에서도 같은 runId로 로깅 가능
   const runId = `run_${Date.now()}`;
 
   try {
-    // 4. 설정 로드
+    // 설정 로드
     const configMap = await readConfigMap(sheets, internalSheetId);
     const config = configMapToAppConfig(configMap);
     config.internalSpreadsheetId = internalSheetId;
 
-    // 설정 검증
     if (!config.dbSpreadsheetId || !config.dbSheetName) {
       throw new Error(
         'DB sheet not configured. Set db_spreadsheet_id and db_sheet_name in config.',
@@ -265,22 +258,30 @@ async function main(): Promise<void> {
       throw new Error('Drive folder not configured. Set drive_folder_id in config.');
     }
 
-    // 5. DB 시트 헤더 변경 감지
-    const dbHeaders = await readHeaders(
-      sheets,
-      config.dbSpreadsheetId,
-      config.dbSheetName,
-    );
+    // ============================================================
+    // ✅ 헤더 해시 처리 로직 (여기가 문제 해결 포인트)
+    // - 최초 실행(저장된 hash 없음): hash 저장 후 계속 진행
+    // - 실제 변경(저장된 hash 있음 + 다름): remapping_needed=true + 중단
+    // ============================================================
+
+    // DB 헤더
+    const dbHeaders = await readHeaders(sheets, config.dbSpreadsheetId, config.dbSheetName);
     const dbHeaderHash = computeHeaderHash(dbHeaders);
 
-    if (detectHeaderChange(dbHeaderHash, config.dbHeaderHash)) {
+    if (!config.dbHeaderHash) {
+      // 최초 실행: 저장만 하고 진행
+      console.log('[Worker] DB header hash not set. Initializing db_header_hash and continuing.');
+      await writeConfigValue(sheets, internalSheetId, 'db_header_hash', dbHeaderHash);
+      await writeConfigValue(sheets, internalSheetId, 'header_remapping_needed', 'false');
+    } else if (dbHeaderHash !== config.dbHeaderHash) {
+      // 실제 변경: remapping 필요
       console.warn('[Worker] DB sheet headers changed! Requires re-mapping in Admin UI.');
       await writeConfigValue(sheets, internalSheetId, 'db_header_hash', dbHeaderHash);
       await writeConfigValue(sheets, internalSheetId, 'header_remapping_needed', 'true');
       throw new Error('DB sheet headers changed. Re-mapping required via Admin UI.');
     }
 
-    // 6. 결과 시트 헤더 변경 감지
+    // 결과 시트 헤더
     const resultHeaders = await readHeaders(
       sheets,
       config.resultSpreadsheetId,
@@ -288,19 +289,20 @@ async function main(): Promise<void> {
     );
     const resultHeaderHash = computeHeaderHash(resultHeaders);
 
-    if (detectHeaderChange(resultHeaderHash, config.resultHeaderHash)) {
-      console.warn('[Worker] Result sheet headers changed! Requires re-mapping in Admin UI.');
-      await writeConfigValue(
-        sheets,
-        internalSheetId,
-        'result_header_hash',
-        resultHeaderHash,
+    if (!config.resultHeaderHash) {
+      console.log(
+        '[Worker] Result header hash not set. Initializing result_header_hash and continuing.',
       );
+      await writeConfigValue(sheets, internalSheetId, 'result_header_hash', resultHeaderHash);
+      await writeConfigValue(sheets, internalSheetId, 'header_remapping_needed', 'false');
+    } else if (resultHeaderHash !== config.resultHeaderHash) {
+      console.warn('[Worker] Result sheet headers changed! Requires re-mapping in Admin UI.');
+      await writeConfigValue(sheets, internalSheetId, 'result_header_hash', resultHeaderHash);
       await writeConfigValue(sheets, internalSheetId, 'header_remapping_needed', 'true');
       throw new Error('Result sheet headers changed. Re-mapping required via Admin UI.');
     }
 
-    // 7. 매핑 로드
+    // 매핑 로드
     let dbMappings: SemanticMapping[];
     let resultMappingConfig: ResultMappingConfig;
     try {
@@ -316,7 +318,7 @@ async function main(): Promise<void> {
       throw new Error('Header mappings are empty. Complete mapping in Admin UI.');
     }
 
-    // 8. 상태 로드 + 배치 계산
+    // 상태 로드 + 배치 계산
     const state = await stateManager.getState();
     const totalRows = await getLastDataRow(sheets, config.dbSpreadsheetId, config.dbSheetName);
 
@@ -336,7 +338,7 @@ async function main(): Promise<void> {
       return;
     }
 
-    // 9. 행 읽기
+    // 행 읽기
     const { rows } = await readRows(
       sheets,
       config.dbSpreadsheetId,
@@ -345,16 +347,15 @@ async function main(): Promise<void> {
       batch.endRow - batch.startRow + 1,
     );
 
-    // 10. 행별 생성 횟수 조회 (row_logs에서)
+    // 행별 생성 횟수 조회
     const rowGenCounts = await getRowGenerationCounts(sheets, internalSheetId);
 
-    // 11. 각 행 처리
+    // 각 행 처리
     for (let i = 0; i < rows.length; i++) {
       const rowIndex = batch.startRow + i;
       const row = rows[i];
       rowsProcessed++;
 
-      // 빈 행 스킵
       const nonEmptyValues = Object.values(row).filter((v) => v && v.trim());
       if (nonEmptyValues.length === 0) {
         console.log(`[Worker] Row ${rowIndex}: Empty, skipping.`);
@@ -380,7 +381,6 @@ async function main(): Promise<void> {
       const template = selectTemplate(rowGenCount, POSTER_TEMPLATES);
 
       try {
-        // (a) LLM 카피 생성
         console.log(`[Worker] Row ${rowIndex}: Generating copy with template "${template.name}"...`);
         const copy = await generateCopy(
           row,
@@ -390,11 +390,9 @@ async function main(): Promise<void> {
           geminiApiKey,
         );
 
-        // (b) 포스터 이미지 생성
         console.log(`[Worker] Row ${rowIndex}: Generating poster image...`);
         const posterResult = await generatePoster(copy, template, geminiApiKey);
 
-        // (c) Drive 업로드
         const fileName = `poster_row${rowIndex}_cycle${state.cycleNumber}_${Date.now()}.png`;
         console.log(`[Worker] Row ${rowIndex}: Uploading to Drive as "${fileName}"...`);
         const uploadResult = await uploadImage(
@@ -404,7 +402,7 @@ async function main(): Promise<void> {
           posterResult.imageBuffer,
         );
 
-        // (d) 결과 시트에 저장 (append-only)
+        // 결과 시트 기록(append-only)
         await writeResultToSheet(
           sheets,
           config.resultSpreadsheetId,
@@ -432,7 +430,6 @@ async function main(): Promise<void> {
           },
         );
 
-        // (e) 로그 기록
         await logRow(sheets, internalSheetId, {
           runId,
           rowIndex,
@@ -481,7 +478,7 @@ async function main(): Promise<void> {
       }
     }
 
-    // 12. 포인터 전진
+    // 포인터 전진
     await stateManager.advancePointer(rows.length, totalRows, state);
 
     runStatus = rowsFailed === 0 ? 'success' : rowsSuccess > 0 ? 'partial' : 'failed';
@@ -499,9 +496,9 @@ async function main(): Promise<void> {
       createdAt: new Date().toISOString(),
     });
   } finally {
-    // 13. 실행 로그 기록
     const finishedAt = new Date().toISOString();
     const state = await stateManager.getState();
+
     await logRun(sheets, internalSheetId, {
       startedAt,
       finishedAt,
@@ -514,15 +511,10 @@ async function main(): Promise<void> {
       errorSummary,
     });
 
-    // 14. 락 해제
     await stateManager.releaseLock();
     console.log(`[Worker] Finished at ${finishedAt}. Status: ${runStatus}`);
   }
 }
-
-// ============================================================
-// Entry Point
-// ============================================================
 
 main().catch((error) => {
   console.error('[Worker] Unhandled error:', error);
