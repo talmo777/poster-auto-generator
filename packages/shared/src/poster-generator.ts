@@ -1,15 +1,25 @@
 /**
  * Poster Generator
  *
- * 템플릿 + 카피 → Gemini 이미지 생성 API로 포스터 이미지 생성.
- * 실패 시 최대 2회 재생성, seed 기록.
+ * Gemini 이미지 생성이 아니라, 실제 데이터 기반으로
+ * 코드 렌더링(Sharp + SVG + QR) 방식의 포스터를 생성한다.
+ * - 실제 이미지 URL 사용
+ * - 홈페이지 URL -> QR 사용
+ * - 텍스트 잘림 방지
+ * - 포스터 품질 안정화
  */
 
-import { GoogleGenerativeAI } from '@google/generative-ai';
-import type { PosterCopy, PosterTemplate, PosterResult } from './types.js';
+import sharp from 'sharp';
+import QRCode from 'qrcode';
+import type {
+  PosterCopy,
+  PosterMaterials,
+  PosterTemplate,
+  PosterResult,
+} from './types.js';
 import { PROMPT_VERSION } from './copy-generator.js';
 
-const MAX_RETRIES = 2;
+const IMAGE_FETCH_TIMEOUT_MS = 12000;
 
 export function generateSeed(): number {
   return Math.floor(Math.random() * 2147483647);
@@ -18,105 +28,605 @@ export function generateSeed(): number {
 export async function generatePoster(
   copy: PosterCopy,
   template: PosterTemplate,
-  geminiApiKey: string,
+  materials: PosterMaterials,
+  _geminiApiKey?: string,
   seed?: number,
 ): Promise<PosterResult> {
   const actualSeed = seed ?? generateSeed();
+  const { width, height } = getCanvasSize(template.aspectRatio);
 
-  const genAI = new GoogleGenerativeAI(geminiApiKey);
-  const model = genAI.getGenerativeModel({
-    model: 'gemini-3.1-flash-image-preview',
-    generationConfig: {
-      // @ts-expect-error
-      responseModalities: ['image', 'text'],
+  const heroArea = getHeroArea(width, height);
+  const panelArea = getPanelArea(width, height);
+  const qrArea = getQrArea(width, height);
+
+  const heroImageBuffer = await buildHeroImage(
+    materials.referenceImageUrl,
+    heroArea.width,
+    heroArea.height,
+    template,
+  );
+
+  const qrBuffer = materials.bookingLink
+    ? await QRCode.toBuffer(materials.bookingLink, {
+        type: 'png',
+        errorCorrectionLevel: 'M',
+        margin: 1,
+        width: qrArea.size,
+        color: {
+          dark: template.colorScheme.text,
+          light: '#FFFFFFFF',
+        },
+      })
+    : null;
+
+  const base = sharp({
+    create: {
+      width,
+      height,
+      channels: 4,
+      background: hexToRgbObject(template.colorScheme.background),
     },
   });
 
-  const prompt = buildImagePrompt(copy, template, actualSeed);
+  const composites: sharp.OverlayOptions[] = [];
 
-  let lastError: Error | null = null;
+  composites.push({
+    input: Buffer.from(buildBackgroundSvg(width, height, template)),
+    top: 0,
+    left: 0,
+  });
 
-  for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
-    try {
-      const result = await model.generateContent(prompt);
-      const response = result.response;
-      const candidates = response.candidates;
+  composites.push({
+    input: Buffer.from(buildRoundedRectSvg(heroArea.width, heroArea.height, 36, '#FFFFFF12')),
+    top: heroArea.top - 8,
+    left: heroArea.left - 8,
+  });
 
-      if (!candidates || candidates.length === 0) {
-        throw new Error('No candidates in response');
-      }
+  composites.push({
+    input: heroImageBuffer,
+    top: heroArea.top,
+    left: heroArea.left,
+  });
 
-      for (const part of candidates[0].content.parts) {
-        if (part.inlineData) {
-          const imageBuffer = Buffer.from(part.inlineData.data!, 'base64');
-          return {
-            imageBuffer,
-            copy,
-            templateId: template.id,
-            seed: actualSeed,
-            promptVersion: PROMPT_VERSION,
-          };
-        }
-      }
+  composites.push({
+    input: Buffer.from(
+      buildGradientOverlaySvg(heroArea.width, heroArea.height, 32, [
+        { offset: '0%', color: '#00000000' },
+        { offset: '70%', color: '#0000001A' },
+        { offset: '100%', color: '#00000080' },
+      ]),
+    ),
+    top: heroArea.top,
+    left: heroArea.left,
+  });
 
-      throw new Error('No image data in response');
-    } catch (error) {
-      lastError = error instanceof Error ? error : new Error(String(error));
-      console.warn(
-        `[PosterGenerator] Attempt ${attempt + 1}/${MAX_RETRIES + 1} failed: ${lastError.message}`,
-      );
+  composites.push({
+    input: Buffer.from(
+      buildRoundedRectSvg(
+        panelArea.width,
+        panelArea.height,
+        32,
+        addAlpha(template.colorScheme.secondary, 0.18),
+        addAlpha(template.colorScheme.accent, 0.35),
+      ),
+    ),
+    top: panelArea.top,
+    left: panelArea.left,
+  });
 
-      if (attempt < MAX_RETRIES) {
-        await sleep(2000 * (attempt + 1));
-      }
-    }
+  composites.push({
+    input: Buffer.from(
+      buildPosterTextSvg(width, height, copy, materials, template, {
+        heroArea,
+        panelArea,
+        qrArea,
+        hasQr: !!qrBuffer,
+      }),
+    ),
+    top: 0,
+    left: 0,
+  });
+
+  if (qrBuffer) {
+    composites.push({
+      input: await sharp(qrBuffer)
+        .resize(qrArea.size, qrArea.size, { fit: 'contain' })
+        .png()
+        .toBuffer(),
+      top: qrArea.top,
+      left: qrArea.left,
+    });
   }
 
-  throw new Error(
-    `Poster generation failed after ${MAX_RETRIES + 1} attempts: ${lastError?.message}`,
-  );
+  const imageBuffer = await base.composite(composites).png().toBuffer();
+
+  return {
+    imageBuffer,
+    copy,
+    templateId: template.id,
+    seed: actualSeed,
+    promptVersion: PROMPT_VERSION,
+  };
 }
 
-function buildImagePrompt(
-  copy: PosterCopy,
+function getCanvasSize(aspectRatio: '4:5' | '9:16'): { width: number; height: number } {
+  if (aspectRatio === '9:16') {
+    return { width: 1080, height: 1920 };
+  }
+  return { width: 1080, height: 1350 };
+}
+
+function getHeroArea(width: number, height: number) {
+  return {
+    left: 68,
+    top: 170,
+    width: width - 136,
+    height: Math.round(height * 0.34),
+  };
+}
+
+function getPanelArea(width: number, height: number) {
+  return {
+    left: 56,
+    top: Math.round(height * 0.60),
+    width: width - 112,
+    height: Math.round(height * 0.22),
+  };
+}
+
+function getQrArea(width: number, height: number) {
+  return {
+    left: width - 220,
+    top: height - 210,
+    size: 132,
+  };
+}
+
+async function buildHeroImage(
+  imageUrl: string | undefined,
+  width: number,
+  height: number,
   template: PosterTemplate,
-  seed: number,
-): string {
-  const dimensions =
-    template.aspectRatio === '4:5' ? '1080x1350 pixels' : '1080x1920 pixels';
+): Promise<Buffer> {
+  const fallback = await sharp({
+    create: {
+      width,
+      height,
+      channels: 4,
+      background: hexToRgbObject(template.colorScheme.primary),
+    },
+  })
+    .composite([
+      {
+        input: Buffer.from(buildFallbackHeroSvg(width, height, template)),
+        top: 0,
+        left: 0,
+      },
+    ])
+    .png()
+    .toBuffer();
 
-  const bulletsText = copy.bullets.map((b, i) => `  ${i + 1}. ${b}`).join('\n');
+  if (!imageUrl) {
+    return fallback;
+  }
 
-  return `Generate a professional promotional poster image for a medical research equipment rental service.
+  try {
+    const imageResponse = await fetchWithTimeout(imageUrl, IMAGE_FETCH_TIMEOUT_MS);
+    if (!imageResponse.ok) {
+      throw new Error(`Image fetch failed: ${imageResponse.status}`);
+    }
 
-DESIGN SPECIFICATIONS:
-- Dimensions: ${dimensions} (aspect ratio ${template.aspectRatio})
-- Style: ${template.promptStyle}
-- Color scheme: Primary ${template.colorScheme.primary}, Secondary ${template.colorScheme.secondary}, Accent ${template.colorScheme.accent}, Background ${template.colorScheme.background}
-- Layout type: ${template.layout}
-- Overall feel: Premium B2B medical/pharmaceutical research institution
+    const arrayBuffer = await imageResponse.arrayBuffer();
+    const remoteBuffer = Buffer.from(arrayBuffer);
 
-TEXT CONTENT TO INCLUDE ON THE POSTER:
-- Main headline: "${copy.headline}"
-- Subheadline: "${copy.subheadline}"
-- Key features:
-${bulletsText}
-- Call to action: "${copy.cta}"
-- Additional info: "${copy.supplementary}"
-
-CRITICAL RULES:
-1. All text MUST be clearly readable and NOT cut off
-2. Use Korean text as provided above
-3. Maintain generous margins and padding
-4. Typography must be clean and professional
-5. Do NOT include any text that is not listed above
-6. The poster should look like it was designed by a professional graphic designer
-7. Include subtle design elements appropriate for medical/research context
-8. Random variation seed: ${seed}
-
-Generate the poster image now.`;
+    return await sharp(remoteBuffer)
+      .resize(width, height, {
+        fit: 'cover',
+        position: 'centre',
+      })
+      .composite([
+        {
+          input: Buffer.from(buildRoundedMaskSvg(width, height, 28)),
+          blend: 'dest-in',
+        },
+      ])
+      .png()
+      .toBuffer();
+  } catch (error) {
+    console.warn(`[PosterGenerator] Hero image fallback used: ${String(error)}`);
+    return fallback;
+  }
 }
 
-function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
+function buildPosterTextSvg(
+  width: number,
+  height: number,
+  copy: PosterCopy,
+  materials: PosterMaterials,
+  template: PosterTemplate,
+  layout: {
+    heroArea: { left: number; top: number; width: number; height: number };
+    panelArea: { left: number; top: number; width: number; height: number };
+    qrArea: { left: number; top: number; size: number };
+    hasQr: boolean;
+  },
+): string {
+  const headlineLines = wrapText(copy.headline, 18, 2);
+  const subheadlineLines = wrapText(copy.subheadline, 32, 2);
+  const supplementaryLines = wrapText(copy.supplementary, 40, 2);
+
+  const bulletItems = copy.bullets.slice(0, 3);
+  const brandLine = escapeXml(
+    materials.category || fixedBrandLine(materials) || '한양맞춤의약연구원 연구장비 공동활용',
+  );
+  const specLine = escapeXml(
+    normalizeFooterLine([
+      materials.manufacturer,
+      materials.modelNumber,
+      materials.specification,
+    ]) || '',
+  );
+  const contactLine = escapeXml(
+    normalizeFooterLine([materials.contact]) || '문의 정보는 센터 홈페이지에서 확인하세요.',
+  );
+  const locationLine = escapeXml(
+    normalizeFooterLine([materials.location]) || '센터 운영 기준에 따라 이용 가능합니다.',
+  );
+  const priceLine = escapeXml(
+    normalizeFooterLine([materials.priceInfo]) || '이용 조건 및 비용은 별도 안내됩니다.',
+  );
+
+  const qrTitle = layout.hasQr ? escapeXml(copy.cta) : '센터 문의';
+  const qrSubtitle = layout.hasQr
+    ? 'QR 스캔 후 상세 정보 확인'
+    : '홈페이지 URL 미연결';
+  const footerTag = layout.hasQr
+    ? 'ONLINE BOOKING'
+    : 'INQUIRY AVAILABLE';
+
+  const headlineSvg = renderLines(headlineLines, {
+    x: 72,
+    y: 84,
+    lineHeight: 72,
+    fontSize: 60,
+    weight: 800,
+    fill: template.colorScheme.text,
+  });
+
+  const subheadlineSvg = renderLines(subheadlineLines, {
+    x: 72,
+    y: 84 + headlineLines.length * 72 + 18,
+    lineHeight: 42,
+    fontSize: 31,
+    weight: 500,
+    fill: addAlpha(template.colorScheme.text, 0.92),
+  });
+
+  const supplementarySvg = renderLines(supplementaryLines, {
+    x: 84,
+    y: layout.panelArea.top + layout.panelArea.height - 42,
+    lineHeight: 30,
+    fontSize: 21,
+    weight: 500,
+    fill: addAlpha('#FFFFFF', 0.88),
+  });
+
+  const bulletSvg = bulletItems
+    .map((item, index) => {
+      const bulletY = layout.panelArea.top + 54 + index * 54;
+      return `
+        <circle cx="98" cy="${bulletY - 6}" r="8" fill="${template.colorScheme.accent}" />
+        <text x="120" y="${bulletY}" font-size="28" font-weight="700" fill="#FFFFFF"
+          font-family="Pretendard, Noto Sans KR, Apple SD Gothic Neo, Malgun Gothic, sans-serif">${escapeXml(item)}</text>
+      `;
+    })
+    .join('');
+
+  return `
+  <svg width="${width}" height="${height}" xmlns="http://www.w3.org/2000/svg">
+    <defs>
+      <filter id="softShadow" x="-20%" y="-20%" width="140%" height="140%">
+        <feDropShadow dx="0" dy="10" stdDeviation="16" flood-color="#000000" flood-opacity="0.22"/>
+      </filter>
+    </defs>
+
+    <text x="72" y="44" font-size="18" font-weight="700" letter-spacing="3"
+      fill="${template.colorScheme.accent}"
+      font-family="Pretendard, Noto Sans KR, Apple SD Gothic Neo, Malgun Gothic, sans-serif">${escapeXml(footerTag)}</text>
+
+    ${headlineSvg}
+    ${subheadlineSvg}
+
+    <text x="72" y="${layout.heroArea.top - 22}" font-size="18" font-weight="700" letter-spacing="2"
+      fill="${addAlpha(template.colorScheme.text, 0.8)}"
+      font-family="Pretendard, Noto Sans KR, Apple SD Gothic Neo, Malgun Gothic, sans-serif">${brandLine}</text>
+
+    ${
+      specLine
+        ? `<rect x="72" y="${layout.heroArea.top + layout.heroArea.height - 60}" rx="14" ry="14" width="${Math.min(
+            layout.heroArea.width - 48,
+            Math.max(320, specLine.length * 12),
+          )}" height="40" fill="#FFFFFFD9" filter="url(#softShadow)" />
+           <text x="92" y="${layout.heroArea.top + layout.heroArea.height - 33}" font-size="20" font-weight="700"
+             fill="${template.colorScheme.primary}"
+             font-family="Pretendard, Noto Sans KR, Apple SD Gothic Neo, Malgun Gothic, sans-serif">${specLine}</text>`
+        : ''
+    }
+
+    <text x="84" y="${layout.panelArea.top + 28}" font-size="20" font-weight="700" letter-spacing="2"
+      fill="${addAlpha('#FFFFFF', 0.82)}"
+      font-family="Pretendard, Noto Sans KR, Apple SD Gothic Neo, Malgun Gothic, sans-serif">KEY BENEFITS</text>
+
+    ${bulletSvg}
+    ${supplementarySvg}
+
+    <text x="72" y="${height - 166}" font-size="19" font-weight="700" fill="${addAlpha(
+      template.colorScheme.text,
+      0.88,
+    )}"
+      font-family="Pretendard, Noto Sans KR, Apple SD Gothic Neo, Malgun Gothic, sans-serif">${escapeXml(locationLine)}</text>
+
+    <text x="72" y="${height - 132}" font-size="19" font-weight="600" fill="${addAlpha(
+      template.colorScheme.text,
+      0.82,
+    )}"
+      font-family="Pretendard, Noto Sans KR, Apple SD Gothic Neo, Malgun Gothic, sans-serif">${escapeXml(contactLine)}</text>
+
+    <text x="72" y="${height - 98}" font-size="19" font-weight="600" fill="${addAlpha(
+      template.colorScheme.text,
+      0.82,
+    )}"
+      font-family="Pretendard, Noto Sans KR, Apple SD Gothic Neo, Malgun Gothic, sans-serif">${escapeXml(priceLine)}</text>
+
+    <rect x="${layout.qrArea.left - 20}" y="${layout.qrArea.top - 20}" rx="24" ry="24" width="${
+      layout.qrArea.size + 40
+    }" height="${layout.qrArea.size + 40}" fill="#FFFFFFF0" />
+    <text x="${layout.qrArea.left - 6}" y="${layout.qrArea.top - 36}" font-size="24" font-weight="800"
+      fill="${template.colorScheme.text}"
+      font-family="Pretendard, Noto Sans KR, Apple SD Gothic Neo, Malgun Gothic, sans-serif">${qrTitle}</text>
+    <text x="${layout.qrArea.left - 6}" y="${layout.qrArea.top - 10}" font-size="16" font-weight="600"
+      fill="${addAlpha(template.colorScheme.text, 0.72)}"
+      font-family="Pretendard, Noto Sans KR, Apple SD Gothic Neo, Malgun Gothic, sans-serif">${qrSubtitle}</text>
+  </svg>
+  `;
+}
+
+function buildBackgroundSvg(width: number, height: number, template: PosterTemplate): string {
+  return `
+  <svg width="${width}" height="${height}" xmlns="http://www.w3.org/2000/svg">
+    <defs>
+      <linearGradient id="bgGradient" x1="0" y1="0" x2="1" y2="1">
+        <stop offset="0%" stop-color="${template.colorScheme.background}" />
+        <stop offset="65%" stop-color="${addAlpha(template.colorScheme.primary, 0.94)}" />
+        <stop offset="100%" stop-color="${addAlpha(template.colorScheme.secondary, 0.98)}" />
+      </linearGradient>
+      <linearGradient id="diagonalAccent" x1="0" y1="1" x2="1" y2="0">
+        <stop offset="0%" stop-color="${addAlpha(template.colorScheme.accent, 0.0)}" />
+        <stop offset="100%" stop-color="${addAlpha(template.colorScheme.accent, 0.32)}" />
+      </linearGradient>
+    </defs>
+
+    <rect width="${width}" height="${height}" fill="url(#bgGradient)" />
+    <path d="M0 ${height * 0.88} L${width * 0.48} ${height} L0 ${height} Z" fill="${addAlpha(
+      template.colorScheme.accent,
+      0.12,
+    )}" />
+    <path d="M${width * 0.52} 0 L${width} 0 L${width} ${height * 0.22} Z" fill="url(#diagonalAccent)" />
+
+    <rect x="30" y="30" width="${width - 60}" height="${height - 60}" rx="26" ry="26"
+      fill="none" stroke="${addAlpha(template.colorScheme.text, 0.10)}" stroke-width="2"/>
+
+    <circle cx="${width - 110}" cy="112" r="42" fill="${addAlpha(template.colorScheme.accent, 0.12)}" />
+    <circle cx="${width - 110}" cy="112" r="22" fill="${addAlpha(template.colorScheme.accent, 0.18)}" />
+
+    <circle cx="98" cy="${height - 92}" r="34" fill="${addAlpha(template.colorScheme.text, 0.05)}" />
+    <circle cx="98" cy="${height - 92}" r="12" fill="${addAlpha(template.colorScheme.text, 0.08)}" />
+  </svg>
+  `;
+}
+
+function buildFallbackHeroSvg(width: number, height: number, template: PosterTemplate): string {
+  const iconX = width / 2;
+  const iconY = height / 2;
+
+  return `
+  <svg width="${width}" height="${height}" xmlns="http://www.w3.org/2000/svg">
+    <defs>
+      <linearGradient id="heroGradient" x1="0" y1="0" x2="1" y2="1">
+        <stop offset="0%" stop-color="${addAlpha(template.colorScheme.secondary, 0.92)}"/>
+        <stop offset="100%" stop-color="${addAlpha(template.colorScheme.primary, 0.98)}"/>
+      </linearGradient>
+    </defs>
+    <rect width="${width}" height="${height}" fill="url(#heroGradient)"/>
+    <circle cx="${iconX}" cy="${iconY - 16}" r="86" fill="${addAlpha('#FFFFFF', 0.14)}"/>
+    <rect x="${iconX - 54}" y="${iconY - 82}" rx="20" ry="20" width="108" height="164" fill="#FFFFFF1E"/>
+    <rect x="${iconX - 26}" y="${iconY - 124}" rx="8" ry="8" width="52" height="52" fill="#FFFFFF24"/>
+    <text x="${iconX}" y="${height - 56}" text-anchor="middle" font-size="28" font-weight="800"
+      fill="#FFFFFF"
+      font-family="Pretendard, Noto Sans KR, Apple SD Gothic Neo, Malgun Gothic, sans-serif">REFERENCE IMAGE PREVIEW</text>
+  </svg>
+  `;
+}
+
+function buildRoundedRectSvg(
+  width: number,
+  height: number,
+  radius: number,
+  fill: string,
+  stroke = '#FFFFFF10',
+): string {
+  return `
+  <svg width="${width}" height="${height}" xmlns="http://www.w3.org/2000/svg">
+    <rect x="0" y="0" width="${width}" height="${height}" rx="${radius}" ry="${radius}"
+      fill="${fill}" stroke="${stroke}" stroke-width="2" />
+  </svg>
+  `;
+}
+
+function buildGradientOverlaySvg(
+  width: number,
+  height: number,
+  radius: number,
+  stops: Array<{ offset: string; color: string }>,
+): string {
+  const stopsSvg = stops
+    .map((stop) => `<stop offset="${stop.offset}" stop-color="${stop.color}" />`)
+    .join('');
+
+  return `
+  <svg width="${width}" height="${height}" xmlns="http://www.w3.org/2000/svg">
+    <defs>
+      <linearGradient id="heroOverlay" x1="0" y1="0" x2="0" y2="1">
+        ${stopsSvg}
+      </linearGradient>
+    </defs>
+    <rect x="0" y="0" width="${width}" height="${height}" rx="${radius}" ry="${radius}" fill="url(#heroOverlay)"/>
+  </svg>
+  `;
+}
+
+function buildRoundedMaskSvg(width: number, height: number, radius: number): string {
+  return `
+  <svg width="${width}" height="${height}" xmlns="http://www.w3.org/2000/svg">
+    <rect x="0" y="0" width="${width}" height="${height}" rx="${radius}" ry="${radius}" fill="#FFFFFF"/>
+  </svg>
+  `;
+}
+
+function renderLines(
+  lines: string[],
+  options: {
+    x: number;
+    y: number;
+    lineHeight: number;
+    fontSize: number;
+    weight: number;
+    fill: string;
+  },
+): string {
+  return lines
+    .map((line, index) => {
+      const y = options.y + index * options.lineHeight;
+      return `<text x="${options.x}" y="${y}" font-size="${options.fontSize}" font-weight="${options.weight}"
+        fill="${options.fill}"
+        font-family="Pretendard, Noto Sans KR, Apple SD Gothic Neo, Malgun Gothic, sans-serif">${escapeXml(
+          line,
+        )}</text>`;
+    })
+    .join('');
+}
+
+function wrapText(input: string, maxCharsPerLine: number, maxLines: number): string[] {
+  const source = (input || '').replace(/\s+/g, ' ').trim();
+  if (!source) return [''];
+
+  const tokens = source.split(' ');
+  const lines: string[] = [];
+  let current = '';
+
+  for (const token of tokens) {
+    if ((current + ' ' + token).trim().length <= maxCharsPerLine) {
+      current = (current + ' ' + token).trim();
+      continue;
+    }
+
+    if (!current) {
+      const sliced = token.slice(0, maxCharsPerLine);
+      lines.push(sliced);
+      const rest = token.slice(maxCharsPerLine);
+      if (rest) {
+        current = rest;
+      }
+    } else {
+      lines.push(current);
+      current = token;
+    }
+
+    if (lines.length >= maxLines) break;
+  }
+
+  if (lines.length < maxLines && current) {
+    lines.push(current);
+  }
+
+  return lines.slice(0, maxLines).map((line, index, arr) => {
+    if (index === arr.length - 1) {
+      return line;
+    }
+    return line.trim();
+  });
+}
+
+function normalizeFooterLine(values: Array<string | undefined>): string {
+  return values
+    .map((value) => (value || '').replace(/\s+/g, ' ').trim())
+    .filter(Boolean)
+    .join(' / ');
+}
+
+function fixedBrandLine(materials: PosterMaterials): string {
+  return materials.equipmentName
+    ? `${materials.equipmentName} 활용 안내`
+    : '한양맞춤의약연구원 연구장비 공동활용';
+}
+
+function addAlpha(hex: string, alpha: number): string {
+  const normalized = hex.replace('#', '');
+  const value =
+    normalized.length === 3
+      ? normalized
+          .split('')
+          .map((char) => char + char)
+          .join('')
+      : normalized;
+
+  const clamped = Math.max(0, Math.min(1, alpha));
+  const alphaHex = Math.round(clamped * 255)
+    .toString(16)
+    .padStart(2, '0')
+    .toUpperCase();
+
+  return `#${value}${alphaHex}`;
+}
+
+function hexToRgbObject(hex: string): { r: number; g: number; b: number; alpha: number } {
+  const normalized = hex.replace('#', '');
+  const value =
+    normalized.length === 3
+      ? normalized
+          .split('')
+          .map((char) => char + char)
+          .join('')
+      : normalized;
+
+  const r = parseInt(value.slice(0, 2), 16);
+  const g = parseInt(value.slice(2, 4), 16);
+  const b = parseInt(value.slice(4, 6), 16);
+
+  return { r, g, b, alpha: 1 };
+}
+
+function escapeXml(value: string): string {
+  return value
+    .replace(/&/g, '&amp;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&apos;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;');
+}
+
+async function fetchWithTimeout(url: string, timeoutMs: number): Promise<Response> {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
+
+  try {
+    return await fetch(url, {
+      signal: controller.signal,
+      headers: {
+        'User-Agent': 'poster-auto-generator/2.0',
+      },
+    });
+  } finally {
+    clearTimeout(timeout);
+  }
 }
