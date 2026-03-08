@@ -63,7 +63,10 @@ export async function ensureLocalFont() {
       }
     }
     if (!downloaded) {
-      console.error('[PosterGenerator] All font download URLs failed.');
+      console.error(
+        '[PosterGenerator] All font download URLs failed. Korean text may not render correctly. ' +
+        'Check network connectivity or install fonts-noto-cjk system package as a fallback.',
+      );
     }
   }
 
@@ -79,8 +82,8 @@ export async function ensureLocalFont() {
   process.env.FONTCONFIG_PATH = fontDir;
 
   try {
-    const { execSync } = await import('child_process');
-    execSync(`fc-cache -f "${fontDir}"`, { stdio: 'ignore', timeout: 10000 });
+    const { execFileSync } = await import('child_process');
+    execFileSync('fc-cache', ['-f', fontDir], { stdio: 'ignore', timeout: 10000 });
   } catch {
     // fc-cache may not be available on all systems
   }
