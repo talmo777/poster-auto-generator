@@ -42,16 +42,28 @@ export async function ensureLocalFont() {
 
   if (!fs.existsSync(fontPath)) {
     console.log(`[PosterGenerator] Downloading font to ${fontPath}...`);
-    const fontUrl = 'https://github.com/googlefonts/noto-cjk/raw/main/Sans/OTF/Korean/NotoSansKR-Regular.otf';
-    try {
-      const response = await fetchWithTimeout(fontUrl, 15000);
-      if (response.ok) {
-        const buffer = await response.arrayBuffer();
-        fs.writeFileSync(fontPath, Buffer.from(buffer));
-        console.log('[PosterGenerator] Font downloaded.');
+    const fontUrls = [
+      'https://github.com/notofonts/noto-cjk/raw/main/Sans/SubsetOTF/KR/NotoSansKR-Regular.otf',
+      'https://cdn.jsdelivr.net/gh/notofonts/noto-cjk@main/Sans/SubsetOTF/KR/NotoSansKR-Regular.otf',
+    ];
+    let downloaded = false;
+    for (const fontUrl of fontUrls) {
+      try {
+        const response = await fetchWithTimeout(fontUrl, 30000);
+        if (response.ok) {
+          const buffer = await response.arrayBuffer();
+          fs.writeFileSync(fontPath, Buffer.from(buffer));
+          console.log(`[PosterGenerator] Font downloaded from ${fontUrl}`);
+          downloaded = true;
+          break;
+        }
+        console.warn(`[PosterGenerator] Font URL returned ${response.status}: ${fontUrl}`);
+      } catch (e) {
+        console.warn(`[PosterGenerator] Font download failed from ${fontUrl}:`, e);
       }
-    } catch (e) {
-      console.error('[PosterGenerator] Failed to download font:', e);
+    }
+    if (!downloaded) {
+      console.error('[PosterGenerator] All font download URLs failed.');
     }
   }
 
@@ -65,6 +77,13 @@ export async function ensureLocalFont() {
   }
 
   process.env.FONTCONFIG_PATH = fontDir;
+
+  try {
+    const { execSync } = await import('child_process');
+    execSync(`fc-cache -f "${fontDir}"`, { stdio: 'ignore', timeout: 10000 });
+  } catch {
+    // fc-cache may not be available on all systems
+  }
 }
 
 export async function generatePoster(
