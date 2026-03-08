@@ -20,9 +20,10 @@ import { PROMPT_VERSION } from './copy-generator.js';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
-import { execSync } from 'child_process';
+import { execFileSync } from 'child_process';
 
 const IMAGE_FETCH_TIMEOUT_MS = 12000;
+const FONT_DOWNLOAD_TIMEOUT_MS = 30000;
 const QR_DARK_COLOR = '#0F172A';
 const QR_LIGHT_COLOR = '#FFFFFF';
 const FONT_STACK =
@@ -52,7 +53,7 @@ export async function ensureLocalFont() {
     if (!fs.existsSync(fontPath)) {
       console.log(`[PosterGenerator] Downloading font ${font.name}...`);
       try {
-        const response = await fetchWithTimeout(font.url, 30000);
+        const response = await fetchWithTimeout(font.url, FONT_DOWNLOAD_TIMEOUT_MS);
         if (response.ok) {
           const buffer = await response.arrayBuffer();
           fs.writeFileSync(fontPath, Buffer.from(buffer));
@@ -80,7 +81,7 @@ export async function ensureLocalFont() {
 
   if (fontDownloaded) {
     try {
-      execSync(`fc-cache -f "${fontDir}"`, { timeout: 10000 });
+      execFileSync('fc-cache', ['-f', fontDir], { timeout: 10000 });
       console.log('[PosterGenerator] Font cache rebuilt.');
     } catch (e) {
       console.warn('[PosterGenerator] fc-cache failed (non-critical):', e);
