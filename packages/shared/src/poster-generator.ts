@@ -55,14 +55,22 @@ export async function ensureLocalFont(weight: 400 | 700 | 900 = 400): Promise<Ar
       try {
         console.log(`[PosterGenerator] Downloading font weight ${weight} from ${fontUrl}...`);
         const response = await fetchWithTimeout(fontUrl, 15000);
-        if (!response.ok) { console.warn(`[PosterGenerator] HTTP ${response.status}`); continue; }
+        if (!response.ok) {
+          console.warn(`[PosterGenerator] HTTP ${response.status}`);
+          continue;
+        }
         const buf = await response.arrayBuffer();
-        if (buf.byteLength < MIN_FONT_FILE_SIZE) { console.warn(`[PosterGenerator] Font too small`); continue; }
+        if (buf.byteLength < MIN_FONT_FILE_SIZE) {
+          console.warn('[PosterGenerator] Font too small');
+          continue;
+        }
         fs.writeFileSync(fontPath, Buffer.from(buf));
         console.log(`[PosterGenerator] Font weight ${weight} downloaded (${buf.byteLength} bytes)`);
         downloaded = true;
         break;
-      } catch (e) { console.warn(`[PosterGenerator] Failed:`, e); }
+      } catch (e) {
+        console.warn('[PosterGenerator] Failed:', e);
+      }
     }
     if (!downloaded) throw new Error(`Failed to download font weight ${weight}`);
   }
@@ -78,7 +86,7 @@ async function fetchWithTimeout(url: string, timeoutMs: number): Promise<Respons
   try {
     return await fetch(url, {
       signal: controller.signal,
-      headers: { 'User-Agent': 'poster-auto-generator/2.1' },
+      headers: { 'User-Agent': 'poster-auto-generator/2.2' },
     });
   } finally {
     clearTimeout(timeout);
@@ -105,398 +113,607 @@ async function fetchImageAsBase64(imageUrl: string | undefined): Promise<string 
   }
 }
 
-/**
- * Build Satori-compatible React-like VDOM tree directly (no satori-html).
- * This avoids all HTML escaping / parsing issues.
- */
+function sanitizeDisplayText(value?: string): string {
+  if (!value) return '';
+
+  return value
+    .normalize('NFKC')
+    .replace(/[\u0000-\u001F\u007F]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .replace(/[|]+/g, ' | ')
+    .replace(/\s*\|\s*/g, ' | ')
+    .replace(/[•▪■◆▶▷]/g, '·')
+    .replace(/�/g, '')
+    .replace(/□/g, '')
+    .replace(/×/g, '×')
+    .replace(/x(?=\d)/gi, '×')
+    .replace(/(?<=\d) ?um\b/gi, 'μm')
+    .replace(/(?<=\d) ?nm\b/gi, 'nm')
+    .replace(/(?<=\d) ?cm\b/gi, 'cm')
+    .replace(/(?<=\d) ?mm\b/gi, 'mm')
+    .replace(/(?<=\d) ?μ m\b/gi, 'μm')
+    .replace(/(?<=\d) ?m\b/g, 'm')
+    .replace(/-90\s*냉각/g, '-90℃ 냉각')
+    .replace(/([0-9])\s*[x×]\s*([0-9])/g, '$1×$2')
+    .replace(/([0-9])\s*~\s*([0-9])/g, '$1~$2')
+    .replace(/\s{2,}/g, ' ')
+    .trim();
+}
+
+function buildStructuredSpecs(materials: PosterMaterials): string[] {
+  const specs: string[] = [];
+
+  const equipment = sanitizeDisplayText(materials.equipmentName);
+  const manufacturer = sanitizeDisplayText(materials.manufacturer);
+  const model = sanitizeDisplayText(materials.modelNumber);
+  const category = sanitizeDisplayText(materials.category);
+  const specification = sanitizeDisplayText(materials.specification);
+
+  if (manufacturer) specs.push(manufacturer);
+  if (model) specs.push(model);
+  if (category) specs.push(category);
+
+  if (specification) {
+    const splitSpecs = specification
+      .split(/\s*\|\s*|\s*\/\s*|\s*;\s*/)
+      .map((item) => sanitizeDisplayText(item))
+      .filter(Boolean)
+      .filter((item) => item !== equipment && item !== manufacturer && item !== model);
+
+    for (const item of splitSpecs) {
+      if (specs.length >= 6) break;
+      if (!specs.includes(item)) specs.push(item);
+    }
+  }
+
+  return specs.slice(0, 6);
+}
+
+function buildBenefitBullets(copy: PosterCopy, materials: PosterMaterials): string[] {
+  const normalized = (copy.bullets || [])
+    .map((item) => sanitizeDisplayText(item))
+    .filter(Boolean)
+    .slice(0, 3);
+
+  if (normalized.length === 3) return normalized;
+
+  const fallbackPool = [
+    sanitizeDisplayText(materials.category),
+    sanitizeDisplayText(materials.description),
+    sanitizeDisplayText(materials.specification),
+    sanitizeDisplayText(materials.location) ? `${sanitizeDisplayText(materials.location)} 설치` : '',
+    '연구 장비 공동활용',
+    '상세 조건 별도 안내',
+    '홈페이지에서 예약 확인',
+  ]
+    .filter(Boolean)
+    .map((item) => item.length > 26 ? `${item.slice(0, 24).trim()}…` : item);
+
+  for (const item of fallbackPool) {
+    if (normalized.length >= 3) break;
+    if (!normalized.includes(item)) normalized.push(item);
+  }
+
+  while (normalized.length < 3) {
+    normalized.push(['전문 연구 지원', '공동활용 장비 운영', '사용 문의 가능'][normalized.length]);
+  }
+
+  return normalized.slice(0, 3);
+}
+
+function buildContactLines(materials: PosterMaterials): string[] {
+  const lines: string[] = [];
+
+  const location = sanitizeDisplayText(materials.location);
+  if (location) lines.push(`설치장소  ${location}`);
+
+  const contact = sanitizeDisplayText(materials.contact);
+  if (contact) lines.push(`문의 및 예약  ${contact}`);
+
+  const supplementary = sanitizeDisplayText(materials.availability || materials.priceInfo);
+  if (supplementary) lines.push(supplementary);
+
+  return lines.slice(0, 3);
+}
+
+function pickEnglishLine(copy: PosterCopy, materials: PosterMaterials): string {
+  const options = [
+    sanitizeDisplayText(copy.subheadline),
+    [sanitizeDisplayText(materials.equipmentName), sanitizeDisplayText(materials.manufacturer)]
+      .filter(Boolean)
+      .join(' | '),
+    'Advanced Research Equipment Access',
+  ].filter(Boolean);
+
+  return options[0] || 'Advanced Research Equipment Access';
+}
+
+function ellipsize(value: string, maxLength: number): string {
+  if (value.length <= maxLength) return value;
+  return `${value.slice(0, Math.max(0, maxLength - 1)).trim()}…`;
+}
+
 function buildPosterVdom(
   width: number,
   height: number,
   copy: PosterCopy,
+  template: PosterTemplate,
   materials: PosterMaterials,
   heroBase64: string | null,
   qrBase64: string | null,
 ) {
-  const headline = copy.headline;
-  const subheadline = copy.subheadline;
-  const categoryLabel = materials.category || copy.cta || '';
+  const accent = template.colorScheme.accent || '#38BDF8';
+  const accentSoft = `${accent}22`;
+  const accentLine = `${accent}55`;
+  const headline = ellipsize(sanitizeDisplayText(copy.headline || materials.equipmentName || '첨단 연구장비 공동활용'), 34);
+  const englishLine = ellipsize(pickEnglishLine(copy, materials), 62);
+  const equipmentLabel = ellipsize(
+    sanitizeDisplayText(
+      [materials.equipmentName, materials.modelNumber, materials.manufacturer].filter(Boolean).join(' | '),
+    ) || '연구 장비 정보',
+    90,
+  );
+  const specItems = buildStructuredSpecs(materials);
+  const bullets = buildBenefitBullets(copy, materials);
+  const contactLines = buildContactLines(materials);
+  const footerMessage = ellipsize(
+    sanitizeDisplayText(copy.supplementary) ||
+      '맞춤의약연구원 홈페이지에서 장비 상세 정보와 이용 절차를 확인할 수 있습니다.',
+    80,
+  );
 
-  // Build spec text
-  const specParts = [materials.equipmentName, materials.manufacturer, materials.modelNumber, materials.specification].filter(Boolean);
-  const specText = specParts.join(' | ');
+  const heroContent = heroBase64
+    ? {
+        type: 'img',
+        props: {
+          src: heroBase64,
+          style: {
+            width: '100%',
+            height: '100%',
+            objectFit: 'contain' as const,
+            objectPosition: 'center center' as const,
+          },
+        },
+      }
+    : {
+        type: 'div',
+        props: {
+          style: {
+            display: 'flex',
+            width: '100%',
+            height: '100%',
+            alignItems: 'center',
+            justifyContent: 'center',
+            background: 'linear-gradient(135deg, rgba(15,23,42,0.92), rgba(30,41,59,0.72))',
+            color: '#94A3B8',
+            fontSize: 22,
+            fontWeight: 700,
+            letterSpacing: 0.2,
+          },
+          children: 'IMAGE PREVIEW',
+        },
+      };
 
-  const locationLine = materials.location ? `설치장소 : ${materials.location}` : '';
-  const contactLine = materials.contact ? `담당자 : ${materials.contact}` : '';
-  const priceLine = materials.priceInfo || '';
-  const footerMsg = copy.supplementary || '맞춤의약연구원에서 사용요금을 내고 사용 가능하며, 의뢰 가격은 홈페이지를 참고해 주시기 바랍니다. 예약은 연구원 회원가입 및 담당교수 승인 후 가능합니다.';
-
-  // Build bullet elements
-  const bulletElements = copy.bullets.slice(0, 3).map((b, i) => ({
+  const bulletNodes = bullets.map((item, index) => ({
     type: 'div',
     props: {
-      style: { display: 'flex', alignItems: 'flex-start', marginBottom: i === 2 ? 0 : 24 }, // Increased margin
+      style: {
+        display: 'flex',
+        alignItems: 'flex-start',
+        marginBottom: index === bullets.length - 1 ? 0 : 22,
+      },
       children: [
         {
           type: 'div',
           props: {
-            style: { display: 'flex', width: 16, height: 16, borderRadius: 8, backgroundColor: '#38BDF8', flexShrink: 0, marginTop: 10 }, // Slightly larger dot
+            style: {
+              display: 'flex',
+              width: 12,
+              height: 12,
+              marginTop: 12,
+              marginRight: 16,
+              borderRadius: 999,
+              background: accent,
+              boxShadow: `0 0 0 6px ${accentSoft}`,
+              flexShrink: 0,
+            },
             children: [],
           },
         },
         {
           type: 'div',
           props: {
-            style: { display: 'flex', fontSize: 26, fontWeight: 700, color: 'white', marginLeft: 16, flex: 1, lineHeight: 1.5, wordBreak: 'keep-all' as const }, // Enlarged text
-            children: b,
+            style: {
+              display: 'flex',
+              flex: 1,
+              color: '#F8FAFC',
+              fontSize: 27,
+              fontWeight: 700,
+              lineHeight: 1.45,
+              wordBreak: 'keep-all' as const,
+            },
+            children: item,
           },
         },
       ],
     },
   }));
 
-  // Hero image element
-  const heroElement = heroBase64
+  const specNodes = specItems.map((item) => ({
+    type: 'div',
+    props: {
+      style: {
+        display: 'flex',
+        padding: '10px 16px',
+        marginRight: 10,
+        marginBottom: 10,
+        borderRadius: 999,
+        background: 'rgba(241,245,249,0.92)',
+        border: `1px solid ${accentLine}`,
+        color: '#0F172A',
+        fontSize: 17,
+        fontWeight: 700,
+        lineHeight: 1.2,
+      },
+      children: item,
+    },
+  }));
+
+  const contactNodes = contactLines.map((item, index) => ({
+    type: 'div',
+    props: {
+      style: {
+        display: 'flex',
+        fontSize: index === 0 ? 26 : 24,
+        fontWeight: index < 2 ? 700 : 500,
+        color: index < 2 ? '#F8FAFC' : '#CBD5E1',
+        lineHeight: 1.45,
+        marginBottom: index === contactLines.length - 1 ? 0 : 8,
+        wordBreak: 'keep-all' as const,
+      },
+      children: item,
+    },
+  }));
+
+  const qrNode = qrBase64
     ? {
-      type: 'img',
-      props: {
-        src: heroBase64,
-        style: { width: '100%', height: '100%', objectFit: 'contain' as const },
-      },
-    }
-    : {
-      type: 'div',
-      props: {
-        style: { display: 'flex', alignItems: 'center', justifyContent: 'center', width: '100%', height: '100%', background: 'rgba(30,41,59,0.8)', color: '#64748B', fontSize: 22 },
-        children: 'REFERENCE IMAGE PREVIEW',
-      },
-    };
-
-  // Contact info children
-  const contactChildren: any[] = [];
-  if (locationLine) contactChildren.push({
-    type: 'div',
-    props: { style: { display: 'flex', fontSize: 24, fontWeight: 700, color: '#F8FAFC', lineHeight: 1.5, wordBreak: 'keep-all' as const }, children: locationLine },
-  });
-  if (contactLine) contactChildren.push({
-    type: 'div',
-    props: { style: { display: 'flex', fontSize: 24, fontWeight: 700, color: '#F8FAFC', marginTop: 6, lineHeight: 1.5, wordBreak: 'keep-all' as const }, children: contactLine },
-  });
-
-  // QR element
-  const qrElement = qrBase64
-    ? {
-      type: 'div',
-      props: {
-        style: { display: 'flex', flexDirection: 'column' as const, alignItems: 'center' },
-        children: [
-          {
-            type: 'div',
-            props: {
-              style: { display: 'flex', padding: 14, background: 'white', borderRadius: 16 },
-              children: [{
-                type: 'img',
-                props: { src: qrBase64, width: 120, height: 120 },
-              }],
-            },
-          },
-          {
-            type: 'div',
-            props: {
-              style: { fontSize: 15, fontWeight: 700, marginTop: 8, color: '#94A3B8' },
-              children: '홈페이지 바로가기',
-            },
-          },
-        ],
-      },
-    }
-    : null;
-
-  // Top-level content children
-  const contentChildren: any[] = [];
-
-  // 1. Headline section (Centered)
-  const headlineChildren: any[] = [];
-  headlineChildren.push({
-    type: 'div',
-    props: {
-      style: { display: 'flex', fontSize: 46, fontWeight: 900, lineHeight: 1.25, color: 'white', textAlign: 'center' as const, zIndex: 10, padding: '0 40px', wordBreak: 'keep-all' as const },
-      children: headline,
-    },
-  });
-  // Subheadline (English thin subheadline right below)
-  if (subheadline) {
-    headlineChildren.push({
-      type: 'div',
-      props: {
-        style: { display: 'flex', fontSize: 22, fontWeight: 400, color: '#CBD5E1', marginTop: 12, lineHeight: 1.4, textAlign: 'center' as const, zIndex: 10, padding: '0 60px', wordBreak: 'keep-all' as const },
-        children: subheadline,
-      },
-    });
-  }
-  contentChildren.push({
-    type: 'div',
-    props: { style: { display: 'flex', flexDirection: 'column' as const, alignItems: 'center', width: '100%' }, children: headlineChildren },
-  });
-
-  // 2. Hero image card with Spec badge inside bottom
-  const heroCardChildren: any[] = [];
-  heroCardChildren.push({
-    type: 'div',
-    props: {
-      style: {
-        display: 'flex',
-        width: '100%',
-        height: 440, // Increased height to minimize empty space
-        background: 'rgba(255,255,255,0.03)',
-        borderTopLeftRadius: 18,
-        borderTopRightRadius: 18,
-        borderBottomLeftRadius: specText ? 0 : 18,
-        borderBottomRightRadius: specText ? 0 : 18,
-        overflow: 'hidden',
-        padding: 10,
-      },
-      children: [heroElement],
-    },
-  });
-
-  if (specText) {
-    heroCardChildren.push({
-      type: 'div',
-      props: {
-        style: {
-          display: 'flex',
-          width: '100%',
-          alignItems: 'center',
-          justifyContent: 'center',
-          padding: '24px 24px',
-          background: 'rgba(255,255,255,0.75)', // The reference shows it as a solid but slightly translucent light grey/white area, distinctly different from the image bg
-          borderBottomLeftRadius: 16,
-          borderBottomRightRadius: 16,
-        },
-        children: [{
-          type: 'div',
-          props: { style: { display: 'flex', fontSize: 18, fontWeight: 700, color: '#0F172A', textAlign: 'center' as const, lineHeight: 1.5, wordBreak: 'keep-all' as const }, children: specText },
-        }],
-      },
-    });
-  }
-
-  contentChildren.push({
-    type: 'div',
-    props: {
-      style: {
-        display: 'flex',
-        flexDirection: 'column' as const,
-        marginTop: 24,
-        width: '100%',
-        borderRadius: 20,
-        background: 'linear-gradient(135deg, rgba(255,255,255,0.2) 0%, rgba(56,189,248,0.3) 100%)', // Enhanced glowing border
-        padding: 4, // creates the border effect
-        boxShadow: '0 10px 30px rgba(0,0,0,0.5)',
-      },
-      children: [
-        {
-          type: 'div',
-          props: {
-            // Inner radius slightly smaller for perfect fit. We need the bottom to match if there is spec text.
-            style: { display: 'flex', flexDirection: 'column' as const, borderRadius: 16, overflow: 'hidden' },
-            children: heroCardChildren
-          }
-        }
-      ],
-    },
-  });
-
-  // 3. Bullet points card
-  contentChildren.push({
-    type: 'div',
-    props: {
-      style: {
-        display: 'flex',
-        marginTop: 60,
-        width: '100%',
-        borderRadius: 20,
-        background: 'linear-gradient(135deg, rgba(56,189,248,0.3) 0%, rgba(255,255,255,0.05) 100%)', // gradient border
-        padding: 3, // glowing border thickness
-        position: 'relative' as const,
-      },
-      children: [
-        // Decorator circle on top-left of the bullet card
-        {
-          type: 'div',
-          props: {
-            style: { display: 'flex', position: 'absolute' as const, top: -20, left: 30, width: 60, height: 60, borderRadius: 30, background: '#38BDF8', opacity: 0.9 },
-            children: [],
-          }
-        },
-        {
-          type: 'div',
-          props: {
-            style: { display: 'flex', flexDirection: 'column' as const, width: '100%', padding: '54px 40px', borderRadius: 18, background: 'rgba(15,23,42,0.85)' },
-            children: bulletElements,
-          }
-        }
-      ],
-    },
-  });
-
-  // 5. Spacer
-  contentChildren.push({
-    type: 'div',
-    props: { style: { display: 'flex', flexGrow: 1 }, children: [] },
-  });
-
-  // 6. Footer: contact + QR
-  const footerRowChildren: any[] = [];
-  footerRowChildren.push({
-    type: 'div',
-    props: { style: { display: 'flex', flexDirection: 'column' as const, maxWidth: 780 }, children: contactChildren },
-  });
-  if (qrElement) footerRowChildren.push(qrElement);
-
-  contentChildren.push({
-    type: 'div',
-    props: {
-      style: { display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', marginTop: 16 },
-      children: footerRowChildren,
-    },
-  });
-
-  // 7. Footer message
-  contentChildren.push({
-    type: 'div',
-    props: {
-      style: { display: 'flex', marginTop: 12 },
-      children: [{
         type: 'div',
         props: {
-          style: { display: 'flex', fontSize: 18, fontWeight: 400, color: '#94A3B8', lineHeight: 1.5 }, // Enlarged footer message
-          children: footerMsg,
+          style: {
+            display: 'flex',
+            flexDirection: 'column' as const,
+            alignItems: 'center',
+            justifyContent: 'center',
+            width: 168,
+            padding: '14px 14px 10px',
+            borderRadius: 18,
+            background: 'rgba(255,255,255,0.96)',
+            border: `2px solid ${accentLine}`,
+            boxShadow: '0 12px 30px rgba(2,6,23,0.30)',
+          },
+          children: [
+            {
+              type: 'img',
+              props: {
+                src: qrBase64,
+                width: 132,
+                height: 132,
+              },
+            },
+            {
+              type: 'div',
+              props: {
+                style: {
+                  display: 'flex',
+                  marginTop: 8,
+                  color: '#0F172A',
+                  fontSize: 15,
+                  fontWeight: 700,
+                  textAlign: 'center' as const,
+                },
+                children: '홈페이지 바로가기',
+              },
+            },
+          ],
         },
-      }],
-    },
-  });
+      }
+    : null;
 
-  // ============================================================
-  // BACKGROUND + DECORATIVE LAYERS
-  // ============================================================
-  const decorativeChildren: any[] = [];
-
-  // 1. Dark overlay gradient
-  decorativeChildren.push({
-    type: 'div',
-    props: {
-      style: {
-        display: 'flex',
-        position: 'absolute' as const,
-        top: 0, left: 0, right: 0, bottom: 0,
-        background: 'linear-gradient(135deg, rgba(15,23,42,0.9), rgba(2,6,23,0.95), rgba(15,23,42,0.9))',
-      },
-      children: [],
-    },
-  });
-
-  // 2. Top-right accent circle (mint/cyan) - matching the reference positioning
-  decorativeChildren.push({
-    type: 'div',
-    props: {
-      style: {
-        display: 'flex',
-        position: 'absolute' as const,
-        top: 40, right: 30,
-        width: 80, height: 80,
-        borderRadius: 40,
-        background: 'linear-gradient(135deg, #38BDF8, #06B6D4)',
-        opacity: 0.9,
-      },
-      children: [],
-    },
-  });
-  // Inner ring for top-right circle
-  decorativeChildren.push({
-    type: 'div',
-    props: {
-      style: {
-        display: 'flex',
-        position: 'absolute' as const,
-        top: 48, right: 38,
-        width: 64, height: 64,
-        borderRadius: 32,
-        border: '4px solid rgba(255,255,255,0.25)',
-      },
-      children: [],
-    },
-  });
-
-  // 3. Bottom-left small circle
-  decorativeChildren.push({
-    type: 'div',
-    props: {
-      style: {
-        display: 'flex',
-        position: 'absolute' as const,
-        bottom: 80, left: -40,
-        width: 100, height: 100,
-        borderRadius: 50,
-        background: 'rgba(56,189,248,0.1)',
-        border: '1px solid rgba(56,189,248,0.25)',
-      },
-      children: [],
-    },
-  });
-
-  // 4. Subtle diagonal accent lines
-  decorativeChildren.push({
-    type: 'div',
-    props: {
-      style: {
-        display: 'flex',
-        position: 'absolute' as const,
-        top: 0, right: 200,
-        width: 2, height: 250,
-        background: 'linear-gradient(to bottom, rgba(56,189,248,0.3), transparent)',
-      },
-      children: [],
-    },
-  });
-  decorativeChildren.push({
-    type: 'div',
-    props: {
-      style: {
-        display: 'flex',
-        position: 'absolute' as const,
-        bottom: 0, left: 200,
-        width: 2, height: 200,
-        background: 'linear-gradient(to top, rgba(56,189,248,0.2), transparent)',
-      },
-      children: [],
-    },
-  });
-
-  // ========== CONTENT LAYER ========== 
-  const contentLayer = {
-    type: 'div',
-    props: {
-      style: { display: 'flex', flexDirection: 'column' as const, padding: '56px 52px 40px 52px', height: '100%', position: 'relative' as const, zIndex: 10 },
-      children: contentChildren,
-    },
-  };
-
-  // Root
   return {
     type: 'div',
     props: {
       style: {
         display: 'flex',
-        flexDirection: 'column' as const,
-        width: width,
-        height: height,
-        color: 'white',
-        fontFamily: 'Noto Sans KR',
+        width,
+        height,
         position: 'relative' as const,
-        overflow: 'hidden', // Ensure circles bleeding off edges are clipped cleanly
+        overflow: 'hidden',
+        fontFamily: 'Noto Sans KR',
+        background: 'linear-gradient(145deg, #06132A 0%, #0A1C3C 46%, #081224 100%)',
       },
-      children: [...decorativeChildren, contentLayer],
+      children: [
+        {
+          type: 'div',
+          props: {
+            style: {
+              display: 'flex',
+              position: 'absolute' as const,
+              inset: 0,
+              background: 'linear-gradient(180deg, rgba(6,19,42,0.35) 0%, rgba(2,6,23,0.68) 100%)',
+            },
+            children: [],
+          },
+        },
+        {
+          type: 'div',
+          props: {
+            style: {
+              display: 'flex',
+              position: 'absolute' as const,
+              top: -130,
+              right: -70,
+              width: 420,
+              height: 260,
+              transform: 'rotate(18deg)',
+              background: `linear-gradient(180deg, ${accentLine}, transparent)`,
+              opacity: 0.55,
+            },
+            children: [],
+          },
+        },
+        {
+          type: 'div',
+          props: {
+            style: {
+              display: 'flex',
+              position: 'absolute' as const,
+              left: 26,
+              top: 26,
+              right: 26,
+              bottom: 26,
+              borderRadius: 26,
+              border: '1px solid rgba(255,255,255,0.22)',
+            },
+            children: [],
+          },
+        },
+        {
+          type: 'div',
+          props: {
+            style: {
+              display: 'flex',
+              position: 'absolute' as const,
+              top: 46,
+              right: 56,
+              width: 62,
+              height: 62,
+              borderRadius: 999,
+              background: accent,
+              boxShadow: `0 0 0 10px ${accentSoft}`,
+              opacity: 0.95,
+            },
+            children: [],
+          },
+        },
+        {
+          type: 'div',
+          props: {
+            style: {
+              display: 'flex',
+              position: 'absolute' as const,
+              left: 44,
+              bottom: 74,
+              width: 220,
+              height: 220,
+              borderRadius: 999,
+              background: `radial-gradient(circle, ${accentSoft} 0%, transparent 68%)`,
+              opacity: 0.9,
+            },
+            children: [],
+          },
+        },
+        {
+          type: 'div',
+          props: {
+            style: {
+              display: 'flex',
+              flexDirection: 'column' as const,
+              position: 'relative' as const,
+              zIndex: 2,
+              width: '100%',
+              height: '100%',
+              padding: '56px 60px 42px',
+              color: '#FFFFFF',
+            },
+            children: [
+              {
+                type: 'div',
+                props: {
+                  style: {
+                    display: 'flex',
+                    flexDirection: 'column' as const,
+                    alignItems: 'center',
+                    textAlign: 'center' as const,
+                  },
+                  children: [
+                    {
+                      type: 'div',
+                      props: {
+                        style: {
+                          display: 'flex',
+                          color: '#F8FAFC',
+                          fontSize: 56,
+                          fontWeight: 900,
+                          lineHeight: 1.15,
+                          letterSpacing: -1.2,
+                          maxWidth: 900,
+                          wordBreak: 'keep-all' as const,
+                        },
+                        children: headline,
+                      },
+                    },
+                    {
+                      type: 'div',
+                      props: {
+                        style: {
+                          display: 'flex',
+                          marginTop: 14,
+                          color: '#D6E2F0',
+                          fontSize: 21,
+                          fontWeight: 400,
+                          lineHeight: 1.35,
+                          maxWidth: 820,
+                          wordBreak: 'keep-all' as const,
+                        },
+                        children: englishLine,
+                      },
+                    },
+                  ],
+                },
+              },
+              {
+                type: 'div',
+                props: {
+                  style: {
+                    display: 'flex',
+                    flexDirection: 'column' as const,
+                    marginTop: 34,
+                    borderRadius: 28,
+                    padding: 18,
+                    background: 'linear-gradient(180deg, rgba(255,255,255,0.28) 0%, rgba(255,255,255,0.10) 100%)',
+                    boxShadow: '0 24px 60px rgba(2,6,23,0.36)',
+                  },
+                  children: [
+                    {
+                      type: 'div',
+                      props: {
+                        style: {
+                          display: 'flex',
+                          height: height >= 1800 ? 650 : 470,
+                          borderRadius: 22,
+                          padding: 20,
+                          background: 'linear-gradient(180deg, rgba(255,255,255,0.94) 0%, rgba(241,245,249,0.96) 100%)',
+                          overflow: 'hidden',
+                        },
+                        children: [heroContent],
+                      },
+                    },
+                    {
+                      type: 'div',
+                      props: {
+                        style: {
+                          display: 'flex',
+                          marginTop: 16,
+                          padding: '18px 22px',
+                          borderRadius: 18,
+                          background: 'rgba(255,255,255,0.94)',
+                          color: '#0F172A',
+                          fontSize: 19,
+                          fontWeight: 700,
+                          justifyContent: 'center',
+                          textAlign: 'center' as const,
+                          lineHeight: 1.4,
+                          wordBreak: 'keep-all' as const,
+                        },
+                        children: equipmentLabel,
+                      },
+                    },
+                    specNodes.length > 0
+                      ? {
+                          type: 'div',
+                          props: {
+                            style: {
+                              display: 'flex',
+                              flexWrap: 'wrap' as const,
+                              marginTop: 16,
+                              justifyContent: 'center',
+                            },
+                            children: specNodes,
+                          },
+                        }
+                      : {
+                          type: 'div',
+                          props: { style: { display: 'none' }, children: [] },
+                        },
+                  ],
+                },
+              },
+              {
+                type: 'div',
+                props: {
+                  style: {
+                    display: 'flex',
+                    flexDirection: 'column' as const,
+                    marginTop: 28,
+                    borderRadius: 24,
+                    padding: '34px 34px 32px',
+                    background: 'rgba(8,18,36,0.70)',
+                    border: '1px solid rgba(255,255,255,0.15)',
+                    boxShadow: '0 18px 48px rgba(2,6,23,0.24)',
+                  },
+                  children: bulletNodes,
+                },
+              },
+              {
+                type: 'div',
+                props: {
+                  style: {
+                    display: 'flex',
+                    flexGrow: 1,
+                  },
+                  children: [],
+                },
+              },
+              {
+                type: 'div',
+                props: {
+                  style: {
+                    display: 'flex',
+                    justifyContent: 'space-between',
+                    alignItems: 'flex-end',
+                    marginTop: 24,
+                  },
+                  children: [
+                    {
+                      type: 'div',
+                      props: {
+                        style: {
+                          display: 'flex',
+                          flexDirection: 'column' as const,
+                          flex: 1,
+                          paddingRight: 22,
+                        },
+                        children: [
+                          ...contactNodes,
+                          {
+                            type: 'div',
+                            props: {
+                              style: {
+                                display: 'flex',
+                                marginTop: 16,
+                                color: '#D5E1EE',
+                                fontSize: 18,
+                                fontWeight: 400,
+                                lineHeight: 1.45,
+                                maxWidth: 720,
+                              },
+                              children: footerMessage,
+                            },
+                          },
+                        ],
+                      },
+                    },
+                    qrNode || {
+                      type: 'div',
+                      props: { style: { display: 'none' }, children: [] },
+                    },
+                  ],
+                },
+              },
+            ],
+          },
+        },
+      ],
     },
   };
 }
@@ -521,18 +738,17 @@ export async function generatePoster(
     fetchImageAsBase64(materials.referenceImageUrl),
     materials.bookingLink
       ? QRCode.toBuffer(materials.bookingLink, {
-        type: 'png',
-        errorCorrectionLevel: 'M',
-        margin: 0,
-        width: 140,
-        color: { dark: QR_DARK_COLOR, light: QR_LIGHT_COLOR },
-      })
+          type: 'png',
+          errorCorrectionLevel: 'M',
+          margin: 0,
+          width: 144,
+          color: { dark: QR_DARK_COLOR, light: QR_LIGHT_COLOR },
+        })
       : null,
   ]);
 
   const qrBase64 = qrBuffer ? `data:image/png;base64,${qrBuffer.toString('base64')}` : null;
 
-  // Render deeply blurred background layer
   let blurredBgBuffer: Buffer;
   if (materials.referenceImageUrl) {
     try {
@@ -540,23 +756,26 @@ export async function generatePoster(
       const bgArrayBuffer = await res.arrayBuffer();
       blurredBgBuffer = await sharp(Buffer.from(bgArrayBuffer))
         .resize(width, height, { fit: 'cover' })
-        .modulate({ brightness: 0.25, saturation: 1.6 })
+        .modulate({ brightness: 0.28, saturation: 1.15 })
         .blur(80)
         .png()
         .toBuffer();
     } catch {
       blurredBgBuffer = await sharp({
-        create: { width, height, channels: 4, background: '#020617' },
-      }).png().toBuffer();
+        create: { width, height, channels: 4, background: '#081224' },
+      })
+        .png()
+        .toBuffer();
     }
   } else {
     blurredBgBuffer = await sharp({
-      create: { width, height, channels: 4, background: '#020617' },
-    }).png().toBuffer();
+      create: { width, height, channels: 4, background: '#081224' },
+    })
+      .png()
+      .toBuffer();
   }
 
-  // Build React-like VDOM tree directly (bypasses satori-html escaping issues)
-  const vdom = buildPosterVdom(width, height, copy, materials, heroBase64, qrBase64);
+  const vdom = buildPosterVdom(width, height, copy, template, materials, heroBase64, qrBase64);
 
   const svg = await satori(vdom as any, {
     width,
