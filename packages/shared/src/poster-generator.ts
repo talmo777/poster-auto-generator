@@ -20,9 +20,9 @@ import { PROMPT_VERSION } from './copy-generator.js';
 
 const IMAGE_FETCH_TIMEOUT_MS = 12000;
 const QR_DARK_COLOR = '#0F172A';
-const QR_LIGHT_COLOR = '#FFFFFFFF';
+const QR_LIGHT_COLOR = '#FFFFFF';
 const FONT_STACK =
-  "'Noto Sans KR', 'Apple SD Gothic Neo', 'Malgun Gothic', 'NanumGothic', sans-serif";
+  "Noto Sans KR, Apple SD Gothic Neo, Malgun Gothic, NanumGothic, sans-serif";
 
 export function generateSeed(): number {
   return Math.floor(Math.random() * 2147483647);
@@ -51,15 +51,15 @@ export async function generatePoster(
 
   const qrBuffer = materials.bookingLink
     ? await QRCode.toBuffer(materials.bookingLink, {
-        type: 'png',
-        errorCorrectionLevel: 'M',
-        margin: 1,
-        width: qrArea.size,
-        color: {
-          dark: QR_DARK_COLOR,
-          light: QR_LIGHT_COLOR,
-        },
-      })
+      type: 'png',
+      errorCorrectionLevel: 'M',
+      margin: 1,
+      width: qrArea.size,
+      color: {
+        dark: QR_DARK_COLOR,
+        light: QR_LIGHT_COLOR,
+      },
+    })
     : null;
 
   const base = sharp({
@@ -109,8 +109,8 @@ export async function generatePoster(
         panelArea.width,
         panelArea.height,
         32,
-        addAlpha(template.colorScheme.secondary, 0.18),
-        addAlpha(template.colorScheme.accent, 0.35),
+        addAlpha(template.colorScheme.secondary, 0.45),
+        addAlpha(template.colorScheme.accent, 0.65),
       ),
     ),
     top: panelArea.top,
@@ -296,11 +296,11 @@ function buildPosterTextSvg(
 
   const subheadlineSvg = renderLines(subheadlineLines, {
     x: 72,
-    y: 84 + headlineLines.length * 72 + 18,
-    lineHeight: 42,
-    fontSize: 31,
+    y: 84 + headlineLines.length * 72 + 24,
+    lineHeight: 46,
+    fontSize: 34,
     weight: 500,
-    fill: addAlpha(template.colorScheme.text, 0.92),
+    fill: addAlpha(template.colorScheme.text, 0.95),
   });
 
   const supplementarySvg = renderLines(supplementaryLines, {
@@ -342,16 +342,15 @@ function buildPosterTextSvg(
       fill="${addAlpha(template.colorScheme.text, 0.8)}"
       font-family="${FONT_STACK}">${brandLine}</text>
 
-    ${
-      specLine
-        ? `<rect x="72" y="${layout.heroArea.top + layout.heroArea.height - 60}" rx="14" ry="14" width="${Math.min(
-            layout.heroArea.width - 48,
-            Math.max(320, specLine.length * 12),
-          )}" height="40" fill="#FFFFFFD9" filter="url(#softShadow)" />
+    ${specLine
+      ? `<rect x="72" y="${layout.heroArea.top + layout.heroArea.height - 60}" rx="14" ry="14" width="${Math.min(
+        layout.heroArea.width - 48,
+        Math.max(320, specLine.length * 12),
+      )}" height="40" fill="#FFFFFFD9" filter="url(#softShadow)" />
            <text x="92" y="${layout.heroArea.top + layout.heroArea.height - 33}" font-size="20" font-weight="700"
              fill="${template.colorScheme.primary}"
              font-family="${FONT_STACK}">${specLine}</text>`
-        : ''
+      : ''
     }
 
     <text x="84" y="${layout.panelArea.top + 28}" font-size="20" font-weight="700" letter-spacing="2"
@@ -379,9 +378,8 @@ function buildPosterTextSvg(
     )}"
       font-family="${FONT_STACK}">${escapeXml(priceLine)}</text>
 
-    <rect x="${layout.qrArea.left - 20}" y="${layout.qrArea.top - 20}" rx="24" ry="24" width="${
-      layout.qrArea.size + 40
-    }" height="${layout.qrArea.size + 40}" fill="#FFFFFFF0" />
+    <rect x="${layout.qrArea.left - 20}" y="${layout.qrArea.top - 20}" rx="24" ry="24" width="${layout.qrArea.size + 40
+    }" height="${layout.qrArea.size + 40}" fill="#FFFFFF" />
     <text x="${layout.qrArea.left - 6}" y="${layout.qrArea.top - 36}" font-size="24" font-weight="800"
       fill="${template.colorScheme.text}"
       font-family="${FONT_STACK}">${qrTitle}</text>
@@ -397,31 +395,38 @@ function buildBackgroundSvg(width: number, height: number, template: PosterTempl
   <svg width="${width}" height="${height}" xmlns="http://www.w3.org/2000/svg" lang="ko">
     <defs>
       <linearGradient id="bgGradient" x1="0" y1="0" x2="1" y2="1">
-        <stop offset="0%" stop-color="${template.colorScheme.background}" />
-        <stop offset="65%" stop-color="${addAlpha(template.colorScheme.primary, 0.94)}" />
-        <stop offset="100%" stop-color="${addAlpha(template.colorScheme.secondary, 0.98)}" />
+        <stop offset="0%" stop-color="#0F172A" />
+        <stop offset="50%" stop-color="#1E293B" />
+        <stop offset="100%" stop-color="#020617" />
       </linearGradient>
       <linearGradient id="diagonalAccent" x1="0" y1="1" x2="1" y2="0">
         <stop offset="0%" stop-color="${addAlpha(template.colorScheme.accent, 0.0)}" />
-        <stop offset="100%" stop-color="${addAlpha(template.colorScheme.accent, 0.32)}" />
+        <stop offset="100%" stop-color="${addAlpha(template.colorScheme.accent, 0.65)}" />
       </linearGradient>
+      <filter id="glassmorphism" x="-20%" y="-20%" width="140%" height="140%">
+        <feGaussianBlur stdDeviation="32" result="blur" />
+        <feColorMatrix type="matrix" values="1 0 0 0 0  0 1 0 0 0  0 0 1 0 0  0 0 0 18 -7" result="matrix" />
+      </filter>
     </defs>
 
     <rect width="${width}" height="${height}" fill="url(#bgGradient)" />
     <path d="M0 ${height * 0.88} L${width * 0.48} ${height} L0 ${height} Z" fill="${addAlpha(
-      template.colorScheme.accent,
-      0.12,
-    )}" />
+    template.colorScheme.accent,
+    0.25,
+  )}" />
     <path d="M${width * 0.52} 0 L${width} 0 L${width} ${height * 0.22} Z" fill="url(#diagonalAccent)" />
+    
+    <circle cx="${width - 150}" cy="150" r="140" fill="${addAlpha(template.colorScheme.accent, 0.18)}" filter="url(#glassmorphism)" />
+    <circle cx="100" cy="${height - 150}" r="220" fill="${addAlpha(template.colorScheme.primary, 0.45)}" filter="url(#glassmorphism)" />
 
     <rect x="30" y="30" width="${width - 60}" height="${height - 60}" rx="26" ry="26"
-      fill="none" stroke="${addAlpha(template.colorScheme.text, 0.10)}" stroke-width="2"/>
+      fill="none" stroke="${addAlpha(template.colorScheme.text, 0.15)}" stroke-width="2"/>
 
-    <circle cx="${width - 110}" cy="112" r="42" fill="${addAlpha(template.colorScheme.accent, 0.12)}" />
-    <circle cx="${width - 110}" cy="112" r="22" fill="${addAlpha(template.colorScheme.accent, 0.18)}" />
+    <circle cx="${width - 110}" cy="112" r="42" fill="${addAlpha(template.colorScheme.accent, 0.15)}" />
+    <circle cx="${width - 110}" cy="112" r="22" fill="${addAlpha(template.colorScheme.accent, 0.25)}" />
 
-    <circle cx="98" cy="${height - 92}" r="34" fill="${addAlpha(template.colorScheme.text, 0.05)}" />
-    <circle cx="98" cy="${height - 92}" r="12" fill="${addAlpha(template.colorScheme.text, 0.08)}" />
+    <circle cx="98" cy="${height - 92}" r="34" fill="${addAlpha(template.colorScheme.text, 0.08)}" />
+    <circle cx="98" cy="${height - 92}" r="12" fill="${addAlpha(template.colorScheme.text, 0.12)}" />
   </svg>
   `);
 }
@@ -569,9 +574,9 @@ function addAlpha(hex: string, alpha: number): string {
   const value =
     normalized.length === 3
       ? normalized
-          .split('')
-          .map((char) => char + char)
-          .join('')
+        .split('')
+        .map((char) => char + char)
+        .join('')
       : normalized;
 
   const clamped = Math.max(0, Math.min(1, alpha));
@@ -588,9 +593,9 @@ function hexToRgbObject(hex: string): { r: number; g: number; b: number; alpha: 
   const value =
     normalized.length === 3
       ? normalized
-          .split('')
-          .map((char) => char + char)
-          .join('')
+        .split('')
+        .map((char) => char + char)
+        .join('')
       : normalized;
 
   const r = parseInt(value.slice(0, 2), 16);
