@@ -86,7 +86,7 @@ async function fetchWithTimeout(url: string, timeoutMs: number): Promise<Respons
   try {
     return await fetch(url, {
       signal: controller.signal,
-      headers: { 'User-Agent': 'poster-auto-generator/2.2' },
+      headers: { 'User-Agent': 'poster-auto-generator/2.1' },
     });
   } finally {
     clearTimeout(timeout);
@@ -113,194 +113,135 @@ async function fetchImageAsBase64(imageUrl: string | undefined): Promise<string 
   }
 }
 
-function sanitizeDisplayText(value?: string): string {
+function compactText(value: string | undefined | null): string {
   if (!value) return '';
-
   return value
-    .normalize('NFKC')
-    .replace(/[\u0000-\u001F\u007F]/g, ' ')
+    .replace(/[\uFFFD□]/g, '')
     .replace(/\s+/g, ' ')
-    .replace(/[|]+/g, ' | ')
     .replace(/\s*\|\s*/g, ' | ')
-    .replace(/[•▪■◆▶▷]/g, '·')
-    .replace(/�/g, '')
-    .replace(/□/g, '')
-    .replace(/×/g, '×')
-    .replace(/x(?=\d)/gi, '×')
-    .replace(/(?<=\d) ?um\b/gi, 'μm')
-    .replace(/(?<=\d) ?nm\b/gi, 'nm')
-    .replace(/(?<=\d) ?cm\b/gi, 'cm')
-    .replace(/(?<=\d) ?mm\b/gi, 'mm')
-    .replace(/(?<=\d) ?μ m\b/gi, 'μm')
-    .replace(/(?<=\d) ?m\b/g, 'm')
-    .replace(/-90\s*냉각/g, '-90℃ 냉각')
-    .replace(/([0-9])\s*[x×]\s*([0-9])/g, '$1×$2')
-    .replace(/([0-9])\s*~\s*([0-9])/g, '$1~$2')
-    .replace(/\s{2,}/g, ' ')
+    .replace(/\s*,\s*/g, ', ')
+    .replace(/\s*\/\s*/g, ' / ')
     .trim();
 }
 
-function buildStructuredSpecs(materials: PosterMaterials): string[] {
-  const specs: string[] = [];
-
-  const equipment = sanitizeDisplayText(materials.equipmentName);
-  const manufacturer = sanitizeDisplayText(materials.manufacturer);
-  const model = sanitizeDisplayText(materials.modelNumber);
-  const category = sanitizeDisplayText(materials.category);
-  const specification = sanitizeDisplayText(materials.specification);
-
-  if (manufacturer) specs.push(manufacturer);
-  if (model) specs.push(model);
-  if (category) specs.push(category);
-
-  if (specification) {
-    const splitSpecs = specification
-      .split(/\s*\|\s*|\s*\/\s*|\s*;\s*/)
-      .map((item) => sanitizeDisplayText(item))
-      .filter(Boolean)
-      .filter((item) => item !== equipment && item !== manufacturer && item !== model);
-
-    for (const item of splitSpecs) {
-      if (specs.length >= 6) break;
-      if (!specs.includes(item)) specs.push(item);
-    }
-  }
-
-  return specs.slice(0, 6);
+function fixBrokenUnits(value: string): string {
+  if (!value) return '';
+  return value
+    .replace(/-\s*90\s*냉각/g, '-90℃ 냉각')
+    .replace(/([0-9])\s*[x×]\s*([0-9])/gi, '$1×$2')
+    .replace(/([0-9.]+)\s*m\b/g, '$1m')
+    .replace(/([0-9.]+)\s*nm\b/gi, '$1nm')
+    .replace(/([0-9.]+)\s*mm\b/gi, '$1mm')
+    .replace(/([0-9.]+)\s*cm\b/gi, '$1cm')
+    .replace(/([0-9.]+)\s*um\b/gi, '$1μm')
+    .replace(/([0-9.]+)\s*μm\b/gi, '$1μm')
+    .replace(/([0-9.]+)\s*℃/g, '$1℃')
+    .trim();
 }
 
-function buildBenefitBullets(copy: PosterCopy, materials: PosterMaterials): string[] {
-  const normalized = (copy.bullets || [])
-    .map((item) => sanitizeDisplayText(item))
-    .filter(Boolean)
+function cleanDisplayText(value: string | undefined | null): string {
+  return fixBrokenUnits(compactText(value));
+}
+
+function truncateText(value: string, maxLength: number): string {
+  if (value.length <= maxLength) return value;
+  return `${value.slice(0, Math.max(0, maxLength - 1)).trim()}…`;
+}
+
+function buildSpecChips(materials: PosterMaterials): string[] {
+  const candidates = [
+    cleanDisplayText(materials.manufacturer),
+    cleanDisplayText(materials.modelNumber),
+    cleanDisplayText(materials.specification),
+  ].filter(Boolean);
+
+  const chips: string[] = [];
+  for (const value of candidates) {
+    if (chips.length >= 5) break;
+    chips.push(truncateText(value, 34));
+  }
+  return chips;
+}
+
+function normalizeBullets(copy: PosterCopy, materials: PosterMaterials): string[] {
+  const source = copy.bullets
+    .map((item) => cleanDisplayText(item))
+    .filter(Boolean);
+
+  const normalized = source
+    .map((item) => truncateText(item, 34))
     .slice(0, 3);
 
-  if (normalized.length === 3) return normalized;
+  if (normalized.length >= 3) return normalized;
 
-  const fallbackPool = [
-    sanitizeDisplayText(materials.category),
-    sanitizeDisplayText(materials.description),
-    sanitizeDisplayText(materials.specification),
-    sanitizeDisplayText(materials.location) ? `${sanitizeDisplayText(materials.location)} 설치` : '',
-    '연구 장비 공동활용',
-    '상세 조건 별도 안내',
-    '홈페이지에서 예약 확인',
-  ]
-    .filter(Boolean)
-    .map((item) => item.length > 26 ? `${item.slice(0, 24).trim()}…` : item);
+  const fallbacks = [
+    cleanDisplayText(materials.specification),
+    cleanDisplayText(materials.modelNumber),
+    cleanDisplayText(materials.manufacturer),
+  ].filter(Boolean);
 
-  for (const item of fallbackPool) {
+  for (const fb of fallbacks) {
     if (normalized.length >= 3) break;
-    if (!normalized.includes(item)) normalized.push(item);
+    normalized.push(truncateText(fb, 34));
   }
 
   while (normalized.length < 3) {
-    normalized.push(['전문 연구 지원', '공동활용 장비 운영', '사용 문의 가능'][normalized.length]);
+    normalized.push('정밀 분석 및 연구 지원');
   }
 
-  return normalized.slice(0, 3);
-}
-
-function buildContactLines(materials: PosterMaterials): string[] {
-  const lines: string[] = [];
-
-  const location = sanitizeDisplayText(materials.location);
-  if (location) lines.push(`설치장소  ${location}`);
-
-  const contact = sanitizeDisplayText(materials.contact);
-  if (contact) lines.push(`문의 및 예약  ${contact}`);
-
-  const supplementary = sanitizeDisplayText(materials.availability || materials.priceInfo);
-  if (supplementary) lines.push(supplementary);
-
-  return lines.slice(0, 3);
-}
-
-function pickEnglishLine(copy: PosterCopy, materials: PosterMaterials): string {
-  const options = [
-    sanitizeDisplayText(copy.subheadline),
-    [sanitizeDisplayText(materials.equipmentName), sanitizeDisplayText(materials.manufacturer)]
-      .filter(Boolean)
-      .join(' | '),
-    'Advanced Research Equipment Access',
-  ].filter(Boolean);
-
-  return options[0] || 'Advanced Research Equipment Access';
-}
-
-function ellipsize(value: string, maxLength: number): string {
-  if (value.length <= maxLength) return value;
-  return `${value.slice(0, Math.max(0, maxLength - 1)).trim()}…`;
+  return normalized;
 }
 
 function buildPosterVdom(
   width: number,
   height: number,
   copy: PosterCopy,
-  template: PosterTemplate,
   materials: PosterMaterials,
   heroBase64: string | null,
   qrBase64: string | null,
 ) {
-  const accent = template.colorScheme.accent || '#38BDF8';
-  const accentSoft = `${accent}22`;
-  const accentLine = `${accent}55`;
-  const headline = ellipsize(sanitizeDisplayText(copy.headline || materials.equipmentName || '첨단 연구장비 공동활용'), 34);
-  const englishLine = ellipsize(pickEnglishLine(copy, materials), 62);
-  const equipmentLabel = ellipsize(
-    sanitizeDisplayText(
-      [materials.equipmentName, materials.modelNumber, materials.manufacturer].filter(Boolean).join(' | '),
-    ) || '연구 장비 정보',
-    90,
-  );
-  const specItems = buildStructuredSpecs(materials);
-  const bullets = buildBenefitBullets(copy, materials);
-  const contactLines = buildContactLines(materials);
-  const footerMessage = ellipsize(
-    sanitizeDisplayText(copy.supplementary) ||
-      '맞춤의약연구원 홈페이지에서 장비 상세 정보와 이용 절차를 확인할 수 있습니다.',
-    80,
+  const headline = cleanDisplayText(copy.headline);
+  const subheadline = cleanDisplayText(copy.subheadline);
+  const equipmentName = cleanDisplayText(materials.equipmentName) || headline;
+  const categoryLabel = cleanDisplayText(materials.category || copy.cta || '');
+  const specLine = [
+    cleanDisplayText(materials.equipmentName),
+    cleanDisplayText(materials.modelNumber),
+    cleanDisplayText(materials.manufacturer),
+  ].filter(Boolean).join(' | ');
+
+  const specChips = buildSpecChips(materials);
+  const bullets = normalizeBullets(copy, materials);
+
+  const locationLine = cleanDisplayText(materials.location ? `설치장소 ${materials.location}` : '');
+  const contactLine = cleanDisplayText(materials.contact ? `문의 및 예약 ${materials.contact}` : '');
+  const priceLine = cleanDisplayText(materials.priceInfo || '');
+  const footerMsg = cleanDisplayText(
+    copy.supplementary || '홈페이지에서 장비 상세 정보와 사용 안내를 확인할 수 있습니다.'
   );
 
-  const heroContent = heroBase64
-    ? {
-        type: 'img',
-        props: {
-          src: heroBase64,
-          style: {
-            width: '100%',
-            height: '100%',
-            objectFit: 'contain' as const,
-            objectPosition: 'center center' as const,
-          },
-        },
-      }
-    : {
-        type: 'div',
-        props: {
-          style: {
-            display: 'flex',
-            width: '100%',
-            height: '100%',
-            alignItems: 'center',
-            justifyContent: 'center',
-            background: 'linear-gradient(135deg, rgba(15,23,42,0.92), rgba(30,41,59,0.72))',
-            color: '#94A3B8',
-            fontSize: 22,
-            fontWeight: 700,
-            letterSpacing: 0.2,
-          },
-          children: 'IMAGE PREVIEW',
-        },
-      };
+  const headlineLength = headline.length;
+  const hasLongHeadline = headlineLength >= 20;
+  const hasVeryLongHeadline = headlineLength >= 28;
 
-  const bulletNodes = bullets.map((item, index) => ({
+  const headlineFontSize = hasVeryLongHeadline ? 56 : hasLongHeadline ? 64 : 72;
+  const headlineLineHeight = hasVeryLongHeadline ? 1.04 : 1.08;
+  const subheadlineFontSize = hasVeryLongHeadline ? 18 : 20;
+  const heroHeight = hasVeryLongHeadline ? 360 : hasLongHeadline ? 390 : 420;
+  const imageInset = hasVeryLongHeadline ? 18 : 20;
+  const bulletCardMarginTop = hasVeryLongHeadline ? 24 : 30;
+  const footerTitleFontSize = 18;
+  const footerMetaFontSize = 15;
+  const footerNoteFontSize = 13;
+  const qrSize = 104;
+
+  const bulletElements = bullets.map((b, i) => ({
     type: 'div',
     props: {
       style: {
         display: 'flex',
         alignItems: 'flex-start',
-        marginBottom: index === bullets.length - 1 ? 0 : 22,
+        marginBottom: i === bullets.length - 1 ? 0 : 16,
       },
       children: [
         {
@@ -310,12 +251,11 @@ function buildPosterVdom(
               display: 'flex',
               width: 12,
               height: 12,
-              marginTop: 12,
-              marginRight: 16,
               borderRadius: 999,
-              background: accent,
-              boxShadow: `0 0 0 6px ${accentSoft}`,
+              backgroundColor: '#7C3AED',
               flexShrink: 0,
+              marginTop: 9,
+              boxShadow: '0 0 0 4px rgba(168,85,247,0.14)',
             },
             children: [],
           },
@@ -325,57 +265,127 @@ function buildPosterVdom(
           props: {
             style: {
               display: 'flex',
-              flex: 1,
-              color: '#F8FAFC',
-              fontSize: 27,
+              fontSize: 22,
               fontWeight: 700,
-              lineHeight: 1.45,
+              color: 'white',
+              marginLeft: 16,
+              flex: 1,
+              lineHeight: 1.4,
               wordBreak: 'keep-all' as const,
             },
-            children: item,
+            children: b,
           },
         },
       ],
     },
   }));
 
-  const specNodes = specItems.map((item) => ({
+  const chipElements = specChips.slice(0, 5).map((chip) => ({
     type: 'div',
     props: {
       style: {
         display: 'flex',
-        padding: '10px 16px',
-        marginRight: 10,
-        marginBottom: 10,
+        padding: '10px 18px',
         borderRadius: 999,
-        background: 'rgba(241,245,249,0.92)',
-        border: `1px solid ${accentLine}`,
-        color: '#0F172A',
-        fontSize: 17,
+        background: 'rgba(255,255,255,0.96)',
+        color: '#111827',
+        fontSize: 14,
         fontWeight: 700,
         lineHeight: 1.2,
+        marginRight: 12,
+        marginBottom: 12,
+        border: '1px solid rgba(148,163,184,0.28)',
       },
-      children: item,
+      children: chip,
     },
   }));
 
-  const contactNodes = contactLines.map((item, index) => ({
-    type: 'div',
-    props: {
-      style: {
-        display: 'flex',
-        fontSize: index === 0 ? 26 : 24,
-        fontWeight: index < 2 ? 700 : 500,
-        color: index < 2 ? '#F8FAFC' : '#CBD5E1',
-        lineHeight: 1.45,
-        marginBottom: index === contactLines.length - 1 ? 0 : 8,
-        wordBreak: 'keep-all' as const,
-      },
-      children: item,
-    },
-  }));
+  const heroElement = heroBase64
+    ? {
+        type: 'img',
+        props: {
+          src: heroBase64,
+          style: {
+            width: '100%',
+            height: '100%',
+            objectFit: 'contain' as const,
+            borderRadius: 24,
+            background: '#F8FAFC',
+          },
+        },
+      }
+    : {
+        type: 'div',
+        props: {
+          style: {
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            width: '100%',
+            height: '100%',
+            background: 'rgba(15,23,42,0.92)',
+            borderRadius: 24,
+            color: '#94A3B8',
+            fontSize: 22,
+            fontWeight: 700,
+          },
+          children: 'IMAGE PREVIEW',
+        },
+      };
 
-  const qrNode = qrBase64
+  const contactChildren: any[] = [];
+  if (locationLine) {
+    contactChildren.push({
+      type: 'div',
+      props: {
+        style: {
+          display: 'flex',
+          fontSize: footerTitleFontSize,
+          fontWeight: 700,
+          color: '#F8FAFC',
+          lineHeight: 1.32,
+          wordBreak: 'keep-all' as const,
+        },
+        children: locationLine,
+      },
+    });
+  }
+  if (contactLine) {
+    contactChildren.push({
+      type: 'div',
+      props: {
+        style: {
+          display: 'flex',
+          fontSize: footerTitleFontSize,
+          fontWeight: 700,
+          color: '#F8FAFC',
+          marginTop: 4,
+          lineHeight: 1.32,
+          wordBreak: 'keep-all' as const,
+        },
+        children: contactLine,
+      },
+    });
+  }
+  if (priceLine) {
+    contactChildren.push({
+      type: 'div',
+      props: {
+        style: {
+          display: 'flex',
+          fontSize: footerMetaFontSize,
+          fontWeight: 400,
+          color: '#CBD5E1',
+          marginTop: 8,
+          lineHeight: 1.34,
+          wordBreak: 'keep-all' as const,
+        },
+        children: truncateText(priceLine, 88),
+      },
+    });
+  }
+
+  const qrElement = qrBase64
     ? {
         type: 'div',
         props: {
@@ -383,33 +393,35 @@ function buildPosterVdom(
             display: 'flex',
             flexDirection: 'column' as const,
             alignItems: 'center',
-            justifyContent: 'center',
-            width: 168,
-            padding: '14px 14px 10px',
-            borderRadius: 18,
-            background: 'rgba(255,255,255,0.96)',
-            border: `2px solid ${accentLine}`,
-            boxShadow: '0 12px 30px rgba(2,6,23,0.30)',
+            marginLeft: 24,
+            flexShrink: 0,
           },
           children: [
             {
-              type: 'img',
+              type: 'div',
               props: {
-                src: qrBase64,
-                width: 132,
-                height: 132,
+                style: {
+                  display: 'flex',
+                  padding: 10,
+                  background: 'white',
+                  borderRadius: 16,
+                  border: '2px solid rgba(124,58,237,0.24)',
+                  boxShadow: '0 12px 30px rgba(2,6,23,0.22)',
+                },
+                children: [{
+                  type: 'img',
+                  props: { src: qrBase64, width: qrSize, height: qrSize },
+                }],
               },
             },
             {
               type: 'div',
               props: {
                 style: {
-                  display: 'flex',
-                  marginTop: 8,
-                  color: '#0F172A',
-                  fontSize: 15,
+                  fontSize: 14,
                   fontWeight: 700,
-                  textAlign: 'center' as const,
+                  marginTop: 8,
+                  color: '#CBD5E1',
                 },
                 children: '홈페이지 바로가기',
               },
@@ -419,17 +431,164 @@ function buildPosterVdom(
       }
     : null;
 
-  return {
+  const contentChildren: any[] = [];
+
+  const headlineChildren: any[] = [
+    {
+      type: 'div',
+      props: {
+        style: {
+          display: 'flex',
+          fontSize: headlineFontSize,
+          fontWeight: 900,
+          lineHeight: headlineLineHeight,
+          color: 'white',
+          textAlign: 'center' as const,
+          padding: '0 20px',
+          letterSpacing: -1.6,
+          wordBreak: 'keep-all' as const,
+          justifyContent: 'center',
+        },
+        children: headline,
+      },
+    },
+  ];
+
+  if (subheadline) {
+    headlineChildren.push({
+      type: 'div',
+      props: {
+        style: {
+          display: 'flex',
+          fontSize: subheadlineFontSize,
+          fontWeight: 400,
+          color: '#CBD5E1',
+          marginTop: 10,
+          lineHeight: 1.3,
+          textAlign: 'center' as const,
+          padding: '0 48px',
+          wordBreak: 'keep-all' as const,
+          justifyContent: 'center',
+        },
+        children: subheadline,
+      },
+    });
+  }
+
+  contentChildren.push({
     type: 'div',
     props: {
       style: {
         display: 'flex',
-        width,
-        height,
+        flexDirection: 'column' as const,
+        alignItems: 'center',
+        width: '100%',
+      },
+      children: headlineChildren,
+    },
+  });
+
+  const heroCardChildren: any[] = [
+    {
+      type: 'div',
+      props: {
+        style: {
+          display: 'flex',
+          width: '100%',
+          height: heroHeight,
+          background: 'rgba(255,255,255,0.76)',
+          borderRadius: 28,
+          overflow: 'hidden',
+          padding: imageInset,
+        },
+        children: [heroElement],
+      },
+    },
+  ];
+
+  if (specLine) {
+    heroCardChildren.push({
+      type: 'div',
+      props: {
+        style: {
+          display: 'flex',
+          width: '100%',
+          alignItems: 'center',
+          justifyContent: 'center',
+          padding: '16px 18px 0 18px',
+        },
+        children: [{
+          type: 'div',
+          props: {
+            style: {
+              display: 'flex',
+              width: '100%',
+              justifyContent: 'center',
+              alignItems: 'center',
+              padding: '16px 18px',
+              borderRadius: 18,
+              background: 'rgba(255,255,255,0.94)',
+              color: '#111827',
+              fontSize: 15,
+              fontWeight: 700,
+              lineHeight: 1.3,
+              textAlign: 'center' as const,
+              wordBreak: 'keep-all' as const,
+            },
+            children: truncateText(specLine, 100),
+          },
+        }],
+      },
+    });
+  }
+
+  if (chipElements.length > 0) {
+    heroCardChildren.push({
+      type: 'div',
+      props: {
+        style: {
+          display: 'flex',
+          width: '100%',
+          flexWrap: 'wrap' as const,
+          justifyContent: 'center',
+          alignItems: 'center',
+          padding: '16px 6px 0 6px',
+        },
+        children: chipElements,
+      },
+    });
+  }
+
+  contentChildren.push({
+    type: 'div',
+    props: {
+      style: {
+        display: 'flex',
+        flexDirection: 'column' as const,
+        marginTop: 22,
+        width: '100%',
+        borderRadius: 28,
+        background: 'linear-gradient(180deg, rgba(148,163,184,0.34) 0%, rgba(30,41,59,0.88) 100%)',
+        padding: 18,
+        boxShadow: '0 24px 60px rgba(2,6,23,0.28)',
+      },
+      children: heroCardChildren,
+    },
+  });
+
+  contentChildren.push({
+    type: 'div',
+    props: {
+      style: {
+        display: 'flex',
+        marginTop: bulletCardMarginTop,
+        width: '100%',
+        borderRadius: 24,
+        background: 'rgba(2,6,23,0.54)',
+        border: '1px solid rgba(148,163,184,0.22)',
+        padding: '30px 32px',
         position: 'relative' as const,
-        overflow: 'hidden',
-        fontFamily: 'Noto Sans KR',
-        background: 'linear-gradient(145deg, #06132A 0%, #0A1C3C 46%, #081224 100%)',
+        boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.06)',
       },
       children: [
         {
@@ -438,75 +597,12 @@ function buildPosterVdom(
             style: {
               display: 'flex',
               position: 'absolute' as const,
-              inset: 0,
-              background: 'linear-gradient(180deg, rgba(6,19,42,0.35) 0%, rgba(2,6,23,0.68) 100%)',
-            },
-            children: [],
-          },
-        },
-        {
-          type: 'div',
-          props: {
-            style: {
-              display: 'flex',
-              position: 'absolute' as const,
-              top: -130,
-              right: -70,
-              width: 420,
-              height: 260,
-              transform: 'rotate(18deg)',
-              background: `linear-gradient(180deg, ${accentLine}, transparent)`,
-              opacity: 0.55,
-            },
-            children: [],
-          },
-        },
-        {
-          type: 'div',
-          props: {
-            style: {
-              display: 'flex',
-              position: 'absolute' as const,
-              left: 26,
-              top: 26,
-              right: 26,
-              bottom: 26,
-              borderRadius: 26,
-              border: '1px solid rgba(255,255,255,0.22)',
-            },
-            children: [],
-          },
-        },
-        {
-          type: 'div',
-          props: {
-            style: {
-              display: 'flex',
-              position: 'absolute' as const,
-              top: 46,
-              right: 56,
-              width: 62,
-              height: 62,
-              borderRadius: 999,
-              background: accent,
-              boxShadow: `0 0 0 10px ${accentSoft}`,
-              opacity: 0.95,
-            },
-            children: [],
-          },
-        },
-        {
-          type: 'div',
-          props: {
-            style: {
-              display: 'flex',
-              position: 'absolute' as const,
-              left: 44,
-              bottom: 74,
-              width: 220,
-              height: 220,
-              borderRadius: 999,
-              background: `radial-gradient(circle, ${accentSoft} 0%, transparent 68%)`,
+              top: -12,
+              left: 24,
+              width: 48,
+              height: 48,
+              borderRadius: 24,
+              background: 'linear-gradient(135deg, #A855F7, #F0ABFC)',
               opacity: 0.9,
             },
             children: [],
@@ -518,202 +614,190 @@ function buildPosterVdom(
             style: {
               display: 'flex',
               flexDirection: 'column' as const,
-              position: 'relative' as const,
-              zIndex: 2,
               width: '100%',
-              height: '100%',
-              padding: '56px 60px 42px',
-              color: '#FFFFFF',
+              marginTop: 8,
             },
-            children: [
-              {
-                type: 'div',
-                props: {
-                  style: {
-                    display: 'flex',
-                    flexDirection: 'column' as const,
-                    alignItems: 'center',
-                    textAlign: 'center' as const,
-                  },
-                  children: [
-                    {
-                      type: 'div',
-                      props: {
-                        style: {
-                          display: 'flex',
-                          color: '#F8FAFC',
-                          fontSize: 56,
-                          fontWeight: 900,
-                          lineHeight: 1.15,
-                          letterSpacing: -1.2,
-                          maxWidth: 900,
-                          wordBreak: 'keep-all' as const,
-                        },
-                        children: headline,
-                      },
-                    },
-                    {
-                      type: 'div',
-                      props: {
-                        style: {
-                          display: 'flex',
-                          marginTop: 14,
-                          color: '#D6E2F0',
-                          fontSize: 21,
-                          fontWeight: 400,
-                          lineHeight: 1.35,
-                          maxWidth: 820,
-                          wordBreak: 'keep-all' as const,
-                        },
-                        children: englishLine,
-                      },
-                    },
-                  ],
-                },
-              },
-              {
-                type: 'div',
-                props: {
-                  style: {
-                    display: 'flex',
-                    flexDirection: 'column' as const,
-                    marginTop: 34,
-                    borderRadius: 28,
-                    padding: 18,
-                    background: 'linear-gradient(180deg, rgba(255,255,255,0.28) 0%, rgba(255,255,255,0.10) 100%)',
-                    boxShadow: '0 24px 60px rgba(2,6,23,0.36)',
-                  },
-                  children: [
-                    {
-                      type: 'div',
-                      props: {
-                        style: {
-                          display: 'flex',
-                          height: height >= 1800 ? 650 : 470,
-                          borderRadius: 22,
-                          padding: 20,
-                          background: 'linear-gradient(180deg, rgba(255,255,255,0.94) 0%, rgba(241,245,249,0.96) 100%)',
-                          overflow: 'hidden',
-                        },
-                        children: [heroContent],
-                      },
-                    },
-                    {
-                      type: 'div',
-                      props: {
-                        style: {
-                          display: 'flex',
-                          marginTop: 16,
-                          padding: '18px 22px',
-                          borderRadius: 18,
-                          background: 'rgba(255,255,255,0.94)',
-                          color: '#0F172A',
-                          fontSize: 19,
-                          fontWeight: 700,
-                          justifyContent: 'center',
-                          textAlign: 'center' as const,
-                          lineHeight: 1.4,
-                          wordBreak: 'keep-all' as const,
-                        },
-                        children: equipmentLabel,
-                      },
-                    },
-                    specNodes.length > 0
-                      ? {
-                          type: 'div',
-                          props: {
-                            style: {
-                              display: 'flex',
-                              flexWrap: 'wrap' as const,
-                              marginTop: 16,
-                              justifyContent: 'center',
-                            },
-                            children: specNodes,
-                          },
-                        }
-                      : {
-                          type: 'div',
-                          props: { style: { display: 'none' }, children: [] },
-                        },
-                  ],
-                },
-              },
-              {
-                type: 'div',
-                props: {
-                  style: {
-                    display: 'flex',
-                    flexDirection: 'column' as const,
-                    marginTop: 28,
-                    borderRadius: 24,
-                    padding: '34px 34px 32px',
-                    background: 'rgba(8,18,36,0.70)',
-                    border: '1px solid rgba(255,255,255,0.15)',
-                    boxShadow: '0 18px 48px rgba(2,6,23,0.24)',
-                  },
-                  children: bulletNodes,
-                },
-              },
-              {
-                type: 'div',
-                props: {
-                  style: {
-                    display: 'flex',
-                    flexGrow: 1,
-                  },
-                  children: [],
-                },
-              },
-              {
-                type: 'div',
-                props: {
-                  style: {
-                    display: 'flex',
-                    justifyContent: 'space-between',
-                    alignItems: 'flex-end',
-                    marginTop: 24,
-                  },
-                  children: [
-                    {
-                      type: 'div',
-                      props: {
-                        style: {
-                          display: 'flex',
-                          flexDirection: 'column' as const,
-                          flex: 1,
-                          paddingRight: 22,
-                        },
-                        children: [
-                          ...contactNodes,
-                          {
-                            type: 'div',
-                            props: {
-                              style: {
-                                display: 'flex',
-                                marginTop: 16,
-                                color: '#D5E1EE',
-                                fontSize: 18,
-                                fontWeight: 400,
-                                lineHeight: 1.45,
-                                maxWidth: 720,
-                              },
-                              children: footerMessage,
-                            },
-                          },
-                        ],
-                      },
-                    },
-                    qrNode || {
-                      type: 'div',
-                      props: { style: { display: 'none' }, children: [] },
-                    },
-                  ],
-                },
-              },
-            ],
+            children: bulletElements,
           },
         },
       ],
+    },
+  });
+
+  contentChildren.push({
+    type: 'div',
+    props: { style: { display: 'flex', flexGrow: 1 }, children: [] },
+  });
+
+  const footerRowChildren: any[] = [
+    {
+      type: 'div',
+      props: {
+        style: {
+          display: 'flex',
+          flexDirection: 'column' as const,
+          flex: 1,
+          paddingRight: 16,
+          minWidth: 0,
+        },
+        children: contactChildren,
+      },
+    },
+  ];
+
+  if (qrElement) footerRowChildren.push(qrElement);
+
+  contentChildren.push({
+    type: 'div',
+    props: {
+      style: {
+        display: 'flex',
+        justifyContent: 'space-between',
+        alignItems: 'flex-end',
+        marginTop: 18,
+      },
+      children: footerRowChildren,
+    },
+  });
+
+  if (footerMsg) {
+    contentChildren.push({
+      type: 'div',
+      props: {
+        style: { display: 'flex', marginTop: 10 },
+        children: [{
+          type: 'div',
+          props: {
+            style: {
+              display: 'flex',
+              fontSize: footerNoteFontSize,
+              fontWeight: 400,
+              color: '#94A3B8',
+              lineHeight: 1.32,
+            },
+            children: truncateText(footerMsg, 118),
+          },
+        }],
+      },
+    });
+  }
+
+  const decorativeChildren: any[] = [];
+
+  decorativeChildren.push({
+    type: 'div',
+    props: {
+      style: {
+        display: 'flex',
+        position: 'absolute' as const,
+        top: 0,
+        left: 0,
+        right: 0,
+        bottom: 0,
+        background: 'linear-gradient(135deg, rgba(2,6,23,0.95) 0%, rgba(8,15,46,0.96) 48%, rgba(3,7,18,0.98) 100%)',
+      },
+      children: [],
+    },
+  });
+
+  decorativeChildren.push({
+    type: 'div',
+    props: {
+      style: {
+        display: 'flex',
+        position: 'absolute' as const,
+        top: -100,
+        right: -140,
+        width: 460,
+        height: 260,
+        transform: 'rotate(24deg)',
+        background: 'linear-gradient(135deg, rgba(56,189,248,0.06), rgba(168,85,247,0.18))',
+      },
+      children: [],
+    },
+  });
+
+  decorativeChildren.push({
+    type: 'div',
+    props: {
+      style: {
+        display: 'flex',
+        position: 'absolute' as const,
+        top: 24,
+        left: 24,
+        right: 24,
+        bottom: 24,
+        border: '1px solid rgba(148,163,184,0.22)',
+        borderRadius: 28,
+      },
+      children: [],
+    },
+  });
+
+  decorativeChildren.push({
+    type: 'div',
+    props: {
+      style: {
+        display: 'flex',
+        position: 'absolute' as const,
+        top: 40,
+        right: 36,
+        width: 70,
+        height: 70,
+        borderRadius: 999,
+        background: 'linear-gradient(135deg, #A855F7, #F0ABFC)',
+        opacity: 0.9,
+      },
+      children: [],
+    },
+  });
+
+  decorativeChildren.push({
+    type: 'div',
+    props: {
+      style: {
+        display: 'flex',
+        position: 'absolute' as const,
+        top: 50,
+        right: 46,
+        width: 50,
+        height: 50,
+        borderRadius: 999,
+        border: '3px solid rgba(255,255,255,0.22)',
+      },
+      children: [],
+    },
+  });
+
+  const contentLayer = {
+    type: 'div',
+    props: {
+      style: {
+        display: 'flex',
+        flexDirection: 'column' as const,
+        padding: '38px 52px 52px 52px',
+        height: '100%',
+        position: 'relative' as const,
+        zIndex: 10,
+      },
+      children: contentChildren,
+    },
+  };
+
+  return {
+    type: 'div',
+    props: {
+      style: {
+        display: 'flex',
+        flexDirection: 'column' as const,
+        width,
+        height,
+        color: 'white',
+        fontFamily: 'Noto Sans KR',
+        position: 'relative' as const,
+        overflow: 'hidden',
+      },
+      children: [...decorativeChildren, contentLayer],
     },
   };
 }
@@ -741,7 +825,7 @@ export async function generatePoster(
           type: 'png',
           errorCorrectionLevel: 'M',
           margin: 0,
-          width: 144,
+          width: 140,
           color: { dark: QR_DARK_COLOR, light: QR_LIGHT_COLOR },
         })
       : null,
@@ -756,26 +840,22 @@ export async function generatePoster(
       const bgArrayBuffer = await res.arrayBuffer();
       blurredBgBuffer = await sharp(Buffer.from(bgArrayBuffer))
         .resize(width, height, { fit: 'cover' })
-        .modulate({ brightness: 0.28, saturation: 1.15 })
+        .modulate({ brightness: 0.22, saturation: 1.2 })
         .blur(80)
         .png()
         .toBuffer();
     } catch {
       blurredBgBuffer = await sharp({
-        create: { width, height, channels: 4, background: '#081224' },
-      })
-        .png()
-        .toBuffer();
+        create: { width, height, channels: 4, background: '#020617' },
+      }).png().toBuffer();
     }
   } else {
     blurredBgBuffer = await sharp({
-      create: { width, height, channels: 4, background: '#081224' },
-    })
-      .png()
-      .toBuffer();
+      create: { width, height, channels: 4, background: '#020617' },
+    }).png().toBuffer();
   }
 
-  const vdom = buildPosterVdom(width, height, copy, template, materials, heroBase64, qrBase64);
+  const vdom = buildPosterVdom(width, height, copy, materials, heroBase64, qrBase64);
 
   const svg = await satori(vdom as any, {
     width,
