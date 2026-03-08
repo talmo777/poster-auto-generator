@@ -146,7 +146,7 @@ function buildPosterVdom(
         {
           type: 'div',
           props: {
-            style: { fontSize: 24, fontWeight: 700, color: 'white', marginLeft: 16, flex: 1, lineHeight: 1.4 },
+            style: { display: 'flex', fontSize: 22, fontWeight: 700, color: 'white', marginLeft: 16, flex: 1, lineHeight: 1.5, wordBreak: 'keep-all' as const },
             children: b,
           },
         },
@@ -175,15 +175,15 @@ function buildPosterVdom(
   const contactChildren: any[] = [];
   if (locationLine) contactChildren.push({
     type: 'div',
-    props: { style: { display: 'flex', fontSize: 22, fontWeight: 700, color: '#F8FAFC', lineHeight: 1.4 }, children: locationLine },
+    props: { style: { display: 'flex', fontSize: 18, fontWeight: 700, color: '#F8FAFC', lineHeight: 1.5, wordBreak: 'keep-all' as const }, children: locationLine },
   });
   if (contactLine) contactChildren.push({
     type: 'div',
-    props: { style: { display: 'flex', fontSize: 22, fontWeight: 700, color: '#F8FAFC', marginTop: 6, lineHeight: 1.4 }, children: contactLine },
+    props: { style: { display: 'flex', fontSize: 18, fontWeight: 700, color: '#F8FAFC', marginTop: 4, lineHeight: 1.5, wordBreak: 'keep-all' as const }, children: contactLine },
   });
   if (priceLine) contactChildren.push({
     type: 'div',
-    props: { style: { display: 'flex', fontSize: 22, fontWeight: 700, color: '#F8FAFC', marginTop: 6, lineHeight: 1.4 }, children: priceLine },
+    props: { style: { display: 'flex', fontSize: 18, fontWeight: 700, color: '#F8FAFC', marginTop: 4, lineHeight: 1.5, wordBreak: 'keep-all' as const }, children: priceLine },
   });
 
   // QR element
@@ -223,7 +223,7 @@ function buildPosterVdom(
   headlineChildren.push({
     type: 'div',
     props: {
-      style: { display: 'flex', fontSize: 52, fontWeight: 900, lineHeight: 1.25, color: 'white', textAlign: 'center' as const, zIndex: 10, padding: '0 20px', wordBreak: 'keep-all' as const },
+      style: { display: 'flex', fontSize: 46, fontWeight: 900, lineHeight: 1.25, color: 'white', textAlign: 'center' as const, zIndex: 10, padding: '0 40px', wordBreak: 'keep-all' as const },
       children: headline,
     },
   });
@@ -232,7 +232,7 @@ function buildPosterVdom(
     headlineChildren.push({
       type: 'div',
       props: {
-        style: { display: 'flex', fontSize: 24, fontWeight: 400, color: '#CBD5E1', marginTop: 14, lineHeight: 1.4, textAlign: 'center' as const, zIndex: 10, padding: '0 40px', wordBreak: 'keep-all' as const },
+        style: { display: 'flex', fontSize: 22, fontWeight: 400, color: '#CBD5E1', marginTop: 12, lineHeight: 1.4, textAlign: 'center' as const, zIndex: 10, padding: '0 60px', wordBreak: 'keep-all' as const },
         children: subheadline,
       },
     });
@@ -250,13 +250,14 @@ function buildPosterVdom(
       style: {
         display: 'flex',
         width: '100%',
-        height: 340, // Image area
-        background: 'white',
+        height: 400, // Made taller so 4:3 images don't look squished, leaving no ugly white boxes
+        background: 'rgba(255,255,255,0.03)', // Subtle transparent instead of harsh white
         borderTopLeftRadius: 18,
         borderTopRightRadius: 18,
         borderBottomLeftRadius: specText ? 0 : 18,
         borderBottomRightRadius: specText ? 0 : 18,
         overflow: 'hidden',
+        padding: 10, // Slight padding around the image inside the card
       },
       children: [heroElement],
     },
@@ -271,14 +272,14 @@ function buildPosterVdom(
           width: '100%',
           alignItems: 'center',
           justifyContent: 'center',
-          padding: '16px 20px',
+          padding: '16px 24px',
           background: 'rgba(226, 232, 240, 0.95)', // light grey bar
           borderBottomLeftRadius: 18,
           borderBottomRightRadius: 18,
         },
         children: [{
           type: 'div',
-          props: { style: { display: 'flex', fontSize: 20, fontWeight: 700, color: '#0F172A', textAlign: 'center' as const, lineHeight: 1.4 }, children: specText },
+          props: { style: { display: 'flex', fontSize: 16, fontWeight: 700, color: '#1E293B', textAlign: 'center' as const, lineHeight: 1.5, wordBreak: 'keep-all' as const }, children: specText },
         }],
       },
     });
@@ -318,8 +319,8 @@ function buildPosterVdom(
         marginTop: 20,
         width: '100%',
         borderRadius: 20,
-        background: 'linear-gradient(135deg, rgba(255,255,255,0.15) 0%, rgba(255,255,255,0.02) 100%)', // gradient border
-        padding: 2,
+        background: 'linear-gradient(135deg, rgba(56,189,248,0.3) 0%, rgba(255,255,255,0.05) 100%)', // gradient border
+        padding: 3, // glowing border thickness
         position: 'relative' as const,
       },
       children: [
@@ -327,14 +328,14 @@ function buildPosterVdom(
         {
           type: 'div',
           props: {
-            style: { display: 'flex', position: 'absolute' as const, top: -24, left: 60, width: 48, height: 48, borderRadius: 24, background: '#38BDF8', opacity: 0.9 },
+            style: { display: 'flex', position: 'absolute' as const, top: -35, left: 40, width: 70, height: 70, borderRadius: 35, background: '#38BDF8', opacity: 0.8 },
             children: [],
           }
         },
         {
           type: 'div',
           props: {
-            style: { display: 'flex', flexDirection: 'column' as const, width: '100%', padding: '36px 36px', borderRadius: 18, background: 'rgba(15,23,42,0.8)' },
+            style: { display: 'flex', flexDirection: 'column' as const, width: '100%', padding: '36px 40px', borderRadius: 18, background: 'rgba(15,23,42,0.85)' },
             children: bulletElements,
           }
         }
@@ -398,18 +399,18 @@ function buildPosterVdom(
     },
   });
 
-  // 2. Top-right accent circle (mint/cyan)
+  // 2. Top-right accent circle (mint/cyan) - large and bleeding off edge
   decorativeChildren.push({
     type: 'div',
     props: {
       style: {
         display: 'flex',
         position: 'absolute' as const,
-        top: 40, right: 30, // Pushed outward
-        width: 60, height: 60, // Made slightly smaller
-        borderRadius: 30,
+        top: -40, right: -40,
+        width: 160, height: 160,
+        borderRadius: 80,
         background: 'linear-gradient(135deg, #38BDF8, #06B6D4)',
-        opacity: 0.9,
+        opacity: 0.8,
       },
       children: [],
     },
@@ -421,27 +422,27 @@ function buildPosterVdom(
       style: {
         display: 'flex',
         position: 'absolute' as const,
-        top: 46, right: 36,
-        width: 48, height: 48,
-        borderRadius: 24,
-        border: '4px solid rgba(255,255,255,0.25)',
+        top: -24, right: -24,
+        width: 128, height: 128,
+        borderRadius: 64,
+        border: '6px solid rgba(255,255,255,0.25)',
       },
       children: [],
     },
   });
 
-  // 3. Bottom-left small circle
+  // 3. Bottom-left small circle - removing the awkward dark blue one and making it subtle
   decorativeChildren.push({
     type: 'div',
     props: {
       style: {
         display: 'flex',
         position: 'absolute' as const,
-        bottom: 120, left: 40,
-        width: 48, height: 48,
-        borderRadius: 24,
-        background: 'rgba(56,189,248,0.15)',
-        border: '3px solid rgba(56,189,248,0.3)',
+        bottom: 80, left: -20,
+        width: 80, height: 80,
+        borderRadius: 40,
+        background: 'rgba(56,189,248,0.08)', // very subtle
+        border: '2px solid rgba(56,189,248,0.15)',
       },
       children: [],
     },
@@ -496,6 +497,7 @@ function buildPosterVdom(
         color: 'white',
         fontFamily: 'Noto Sans KR',
         position: 'relative' as const,
+        overflow: 'hidden', // Ensure circles bleeding off edges are clipped cleanly
       },
       children: [...decorativeChildren, contentLayer],
     },
