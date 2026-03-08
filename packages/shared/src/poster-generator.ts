@@ -160,7 +160,7 @@ function buildPosterVdom(
       type: 'img',
       props: {
         src: heroBase64,
-        style: { width: '100%', height: '100%', objectFit: 'cover' as const },
+        style: { width: '100%', height: '100%', objectFit: 'contain' as const },
       },
     }
     : {
@@ -175,15 +175,15 @@ function buildPosterVdom(
   const contactChildren: any[] = [];
   if (locationLine) contactChildren.push({
     type: 'div',
-    props: { style: { fontSize: 20, fontWeight: 700, color: '#E2E8F0' }, children: locationLine },
+    props: { style: { fontSize: 20, fontWeight: 700, color: '#E2E8F0', lineHeight: 1.4 }, children: locationLine },
   });
   if (contactLine) contactChildren.push({
     type: 'div',
-    props: { style: { fontSize: 20, fontWeight: 700, color: '#E2E8F0', marginTop: 4 }, children: contactLine },
+    props: { style: { fontSize: 20, fontWeight: 700, color: '#E2E8F0', marginTop: 6, lineHeight: 1.4 }, children: contactLine },
   });
   if (priceLine) contactChildren.push({
     type: 'div',
-    props: { style: { fontSize: 20, fontWeight: 700, color: '#E2E8F0', marginTop: 4 }, children: priceLine },
+    props: { style: { fontSize: 20, fontWeight: 700, color: '#E2E8F0', marginTop: 6, lineHeight: 1.4 }, children: priceLine },
   });
 
   // QR element
@@ -260,10 +260,12 @@ function buildPosterVdom(
         display: 'flex',
         marginTop: 28,
         width: '100%',
-        height: 380,
+        height: 330, // Reduced from 380 to give more bottom space
         borderRadius: 24,
         overflow: 'hidden',
+        background: 'white', // White background for contain
         border: '2px solid rgba(255,255,255,0.12)',
+        flexShrink: 1,
       },
       children: [heroElement],
     },
@@ -281,10 +283,11 @@ function buildPosterVdom(
           padding: '14px 28px',
           background: 'rgba(255,255,255,0.92)',
           borderRadius: 14,
+          maxWidth: '100%',
         },
         children: [{
           type: 'div',
-          props: { style: { fontSize: 20, fontWeight: 700, color: '#0F172A' }, children: specText },
+          props: { style: { fontSize: 20, fontWeight: 700, color: '#0F172A', lineHeight: 1.4 }, children: specText },
         }],
       },
     });
@@ -317,7 +320,7 @@ function buildPosterVdom(
   const footerRowChildren: any[] = [];
   footerRowChildren.push({
     type: 'div',
-    props: { style: { display: 'flex', flexDirection: 'column' as const }, children: contactChildren },
+    props: { style: { display: 'flex', flexDirection: 'column' as const, maxWidth: 780 }, children: contactChildren },
   });
   if (qrElement) footerRowChildren.push(qrElement);
 
