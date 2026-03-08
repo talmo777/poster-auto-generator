@@ -33,40 +33,43 @@ export function generateSeed(): number {
 
 export async function ensureLocalFont() {
   const fontDir = path.join(os.tmpdir(), 'poster-fonts');
-  const fontPath = path.join(fontDir, 'NotoSansKR-Regular.otf');
   const fontConfigPath = path.join(fontDir, 'fonts.conf');
 
   if (!fs.existsSync(fontDir)) {
     fs.mkdirSync(fontDir, { recursive: true });
   }
 
-  if (!fs.existsSync(fontPath)) {
-    console.log(`[PosterGenerator] Downloading font to ${fontPath}...`);
-    const fontUrls = [
-      'https://github.com/notofonts/noto-cjk/raw/main/Sans/SubsetOTF/KR/NotoSansKR-Regular.otf',
-      'https://cdn.jsdelivr.net/gh/notofonts/noto-cjk@main/Sans/SubsetOTF/KR/NotoSansKR-Regular.otf',
-    ];
-    let downloaded = false;
-    for (const fontUrl of fontUrls) {
-      try {
-        const response = await fetchWithTimeout(fontUrl, 30000);
-        if (response.ok) {
-          const buffer = await response.arrayBuffer();
-          fs.writeFileSync(fontPath, Buffer.from(buffer));
-          console.log(`[PosterGenerator] Font downloaded from ${fontUrl}`);
-          downloaded = true;
-          break;
+  const fontFiles = ['NotoSansKR-Regular.otf', 'NotoSansKR-Bold.otf'];
+  for (const fontFile of fontFiles) {
+    const filePath = path.join(fontDir, fontFile);
+    if (!fs.existsSync(filePath)) {
+      console.log(`[PosterGenerator] Downloading ${fontFile} to ${filePath}...`);
+      const fontUrls = [
+        `https://github.com/notofonts/noto-cjk/raw/main/Sans/SubsetOTF/KR/${fontFile}`,
+        `https://cdn.jsdelivr.net/gh/notofonts/noto-cjk@main/Sans/SubsetOTF/KR/${fontFile}`,
+      ];
+      let downloaded = false;
+      for (const fontUrl of fontUrls) {
+        try {
+          const response = await fetchWithTimeout(fontUrl, 30000);
+          if (response.ok) {
+            const buffer = await response.arrayBuffer();
+            fs.writeFileSync(filePath, Buffer.from(buffer));
+            console.log(`[PosterGenerator] Font downloaded from ${fontUrl}`);
+            downloaded = true;
+            break;
+          }
+          console.warn(`[PosterGenerator] Font URL returned ${response.status}: ${fontUrl}`);
+        } catch (e) {
+          console.warn(`[PosterGenerator] Font download failed from ${fontUrl}:`, e);
         }
-        console.warn(`[PosterGenerator] Font URL returned ${response.status}: ${fontUrl}`);
-      } catch (e) {
-        console.warn(`[PosterGenerator] Font download failed from ${fontUrl}:`, e);
       }
-    }
-    if (!downloaded) {
-      console.error(
-        '[PosterGenerator] All font download URLs failed. Korean text may not render correctly. ' +
-        'Check network connectivity or install fonts-noto-cjk system package as a fallback.',
-      );
+      if (!downloaded) {
+        console.error(
+          `[PosterGenerator] All font download URLs failed for ${fontFile}. Korean text may not render correctly. ` +
+          'Check network connectivity or install fonts-noto-cjk system package as a fallback.',
+        );
+      }
     }
   }
 
@@ -224,27 +227,27 @@ function getCanvasSize(aspectRatio: '4:5' | '9:16'): { width: number; height: nu
 
 function getHeroArea(width: number, height: number) {
   return {
-    left: 68,
-    top: 170,
-    width: width - 136,
-    height: Math.round(height * 0.34),
+    left: 60,
+    top: 200,
+    width: width - 120,
+    height: Math.round(height * 0.31),
   };
 }
 
 function getPanelArea(width: number, height: number) {
   return {
     left: 56,
-    top: Math.round(height * 0.60),
+    top: Math.round(height * 0.545),
     width: width - 112,
-    height: Math.round(height * 0.22),
+    height: Math.round(height * 0.175),
   };
 }
 
 function getQrArea(width: number, height: number) {
   return {
-    left: width - 220,
+    left: width - 216,
     top: height - 210,
-    size: 132,
+    size: 120,
   };
 }
 
@@ -319,72 +322,71 @@ function buildPosterTextSvg(
 ): string {
   const headlineLines = wrapText(copy.headline, 18, 2);
   const subheadlineLines = wrapText(copy.subheadline, 32, 2);
-  const supplementaryLines = wrapText(copy.supplementary, 40, 2);
+  const supplementaryLines = wrapText(copy.supplementary, layout.hasQr ? 34 : 44, 2);
 
   const bulletItems = copy.bullets.slice(0, 3);
-  const brandLine = escapeXml(
-    materials.category || fixedBrandLine(materials) || '한양맞춤의약연구원 연구장비 공동활용',
-  );
-  const specLine = escapeXml(
-    normalizeFooterLine([
-      materials.manufacturer,
-      materials.modelNumber,
-      materials.specification,
-    ]) || '',
-  );
-  const contactLine = escapeXml(
-    normalizeFooterLine([materials.contact]) || '문의 정보는 센터 홈페이지에서 확인하세요.',
-  );
-  const locationLine = escapeXml(
-    normalizeFooterLine([materials.location]) || '센터 운영 기준에 따라 이용 가능합니다.',
-  );
-  const priceLine = escapeXml(
-    normalizeFooterLine([materials.priceInfo]) || '이용 조건 및 비용은 별도 안내됩니다.',
-  );
 
-  const qrTitle = layout.hasQr ? escapeXml(copy.cta) : '센터 문의';
-  const qrSubtitle = layout.hasQr
-    ? 'QR 스캔 후 상세 정보 확인'
-    : '홈페이지 URL 미연결';
-  const footerTag = layout.hasQr ? 'ONLINE BOOKING' : 'INQUIRY AVAILABLE';
+  const equipParts = [materials.equipmentName, materials.manufacturer].filter(Boolean);
+  const equipmentLabel = escapeXml(equipParts.join(' | ') || '연구장비');
+
+  const locationText = escapeXml(
+    (materials.location || '').replace(/\s+/g, ' ').trim() || '센터 운영 기준에 따라 이용 가능',
+  );
+  const contactText = escapeXml(
+    (materials.contact || '').replace(/\s+/g, ' ').trim() || '센터 홈페이지에서 확인하세요',
+  );
+  const priceText = materials.priceInfo
+    ? escapeXml((materials.priceInfo || '').replace(/\s+/g, ' ').trim())
+    : '';
 
   const headlineSvg = renderLines(headlineLines, {
     x: 72,
-    y: 84,
+    y: 82,
     lineHeight: 72,
-    fontSize: 60,
+    fontSize: 58,
     weight: 800,
     fill: template.colorScheme.text,
   });
 
+  const subheadlineY = 82 + headlineLines.length * 72 + 14;
   const subheadlineSvg = renderLines(subheadlineLines, {
     x: 72,
-    y: 84 + headlineLines.length * 72 + 24,
-    lineHeight: 46,
-    fontSize: 34,
+    y: subheadlineY,
+    lineHeight: 42,
+    fontSize: 30,
     weight: 500,
-    fill: addAlpha(template.colorScheme.text, 0.95),
+    fill: addAlpha(template.colorScheme.text, 0.85),
   });
 
-  const supplementarySvg = renderLines(supplementaryLines, {
-    x: 84,
-    y: layout.panelArea.top + layout.panelArea.height - 42,
-    lineHeight: 30,
-    fontSize: 21,
-    weight: 500,
-    fill: addAlpha('#FFFFFF', 0.88),
-  });
+  const equipBarY = layout.heroArea.top + layout.heroArea.height + 14;
+  const equipBarWidth = Math.min(
+    layout.heroArea.width,
+    Math.max(360, equipmentLabel.length * 14 + 80),
+  );
+  const equipBarX = (width - equipBarWidth) / 2;
 
   const bulletSvg = bulletItems
     .map((item, index) => {
-      const bulletY = layout.panelArea.top + 54 + index * 54;
+      const bulletY = layout.panelArea.top + 52 + index * 56;
       return `
-        <circle cx="98" cy="${bulletY - 6}" r="8" fill="${template.colorScheme.accent}" />
-        <text x="120" y="${bulletY}" font-size="28" font-weight="700" fill="#FFFFFF"
+        <circle cx="98" cy="${bulletY - 6}" r="9" fill="${template.colorScheme.accent}" />
+        <text x="124" y="${bulletY}" font-size="28" font-weight="700" fill="#FFFFFF"
           font-family="${FONT_STACK}">${escapeXml(item)}</text>
       `;
     })
     .join('');
+
+  const footerY = layout.panelArea.top + layout.panelArea.height + 40;
+
+  const suppY = footerY + (priceText ? 116 : 80);
+  const supplementarySvg = renderLines(supplementaryLines, {
+    x: 72,
+    y: suppY,
+    lineHeight: 24,
+    fontSize: 16,
+    weight: 500,
+    fill: addAlpha(template.colorScheme.text, 0.62),
+  });
 
   return withSvgDocument(`
   <svg width="${width}" height="${height}" xmlns="http://www.w3.org/2000/svg" lang="ko">
@@ -394,61 +396,41 @@ function buildPosterTextSvg(
       </filter>
     </defs>
 
-    <text x="72" y="44" font-size="18" font-weight="700" letter-spacing="3"
-      fill="${template.colorScheme.accent}"
-      font-family="${FONT_STACK}">${escapeXml(footerTag)}</text>
-
     ${headlineSvg}
     ${subheadlineSvg}
 
-    <text x="72" y="${layout.heroArea.top - 22}" font-size="18" font-weight="700" letter-spacing="2"
-      fill="${addAlpha(template.colorScheme.text, 0.8)}"
-      font-family="${FONT_STACK}">${brandLine}</text>
+    <rect x="${equipBarX}" y="${equipBarY}" rx="8" ry="8"
+      width="${equipBarWidth}" height="44" fill="#FFFFFFEE" filter="url(#softShadow)" />
+    <text x="${width / 2}" y="${equipBarY + 30}" text-anchor="middle"
+      font-size="21" font-weight="700" fill="${template.colorScheme.primary}"
+      font-family="${FONT_STACK}">${equipmentLabel}</text>
 
-    ${specLine
-      ? `<rect x="72" y="${layout.heroArea.top + layout.heroArea.height - 60}" rx="14" ry="14" width="${Math.min(
-        layout.heroArea.width - 48,
-        Math.max(320, specLine.length * 12),
-      )}" height="40" fill="#FFFFFFD9" filter="url(#softShadow)" />
-           <text x="92" y="${layout.heroArea.top + layout.heroArea.height - 33}" font-size="20" font-weight="700"
-             fill="${template.colorScheme.primary}"
-             font-family="${FONT_STACK}">${specLine}</text>`
-      : ''
-    }
-
-    <text x="84" y="${layout.panelArea.top + 28}" font-size="20" font-weight="700" letter-spacing="2"
-      fill="${addAlpha('#FFFFFF', 0.82)}"
-      font-family="${FONT_STACK}">KEY BENEFITS</text>
+    <circle cx="${width / 2}" cy="${equipBarY + 68}" r="8" fill="${template.colorScheme.accent}" />
 
     ${bulletSvg}
+
+    <text x="72" y="${footerY}" font-size="20" font-weight="700"
+      fill="${addAlpha(template.colorScheme.text, 0.9)}"
+      font-family="${FONT_STACK}">설치장소 : ${locationText}</text>
+
+    <text x="72" y="${footerY + 36}" font-size="20" font-weight="700"
+      fill="${addAlpha(template.colorScheme.text, 0.9)}"
+      font-family="${FONT_STACK}">담당자 : ${contactText}</text>
+
+    ${priceText ? `<text x="72" y="${footerY + 72}" font-size="19" font-weight="600"
+      fill="${addAlpha(template.colorScheme.text, 0.78)}"
+      font-family="${FONT_STACK}">${priceText}</text>` : ''}
+
     ${supplementarySvg}
 
-    <text x="72" y="${height - 166}" font-size="19" font-weight="700" fill="${addAlpha(
-      template.colorScheme.text,
-      0.88,
-    )}"
-      font-family="${FONT_STACK}">${escapeXml(locationLine)}</text>
-
-    <text x="72" y="${height - 132}" font-size="19" font-weight="600" fill="${addAlpha(
-      template.colorScheme.text,
-      0.82,
-    )}"
-      font-family="${FONT_STACK}">${escapeXml(contactLine)}</text>
-
-    <text x="72" y="${height - 98}" font-size="19" font-weight="600" fill="${addAlpha(
-      template.colorScheme.text,
-      0.82,
-    )}"
-      font-family="${FONT_STACK}">${escapeXml(priceLine)}</text>
-
-    <rect x="${layout.qrArea.left - 20}" y="${layout.qrArea.top - 20}" rx="24" ry="24" width="${layout.qrArea.size + 40
-    }" height="${layout.qrArea.size + 40}" fill="#FFFFFF" />
-    <text x="${layout.qrArea.left - 6}" y="${layout.qrArea.top - 36}" font-size="24" font-weight="800"
+    ${layout.hasQr ? `
+    <rect x="${layout.qrArea.left - 16}" y="${layout.qrArea.top - 16}" rx="20" ry="20"
+      width="${layout.qrArea.size + 32}" height="${layout.qrArea.size + 32}" fill="#FFFFFF" />
+    <text x="${layout.qrArea.left + layout.qrArea.size / 2}" y="${layout.qrArea.top + layout.qrArea.size + 36}"
+      text-anchor="middle" font-size="17" font-weight="700"
       fill="${template.colorScheme.text}"
-      font-family="${FONT_STACK}">${qrTitle}</text>
-    <text x="${layout.qrArea.left - 6}" y="${layout.qrArea.top - 10}" font-size="16" font-weight="600"
-      fill="${addAlpha(template.colorScheme.text, 0.72)}"
-      font-family="${FONT_STACK}">${qrSubtitle}</text>
+      font-family="${FONT_STACK}">홈페이지 바로가기</text>
+    ` : ''}
   </svg>
   `);
 }
@@ -617,19 +599,6 @@ function wrapText(input: string, maxCharsPerLine: number, maxLines: number): str
   }
 
   return lines.slice(0, maxLines).map((line) => line.trim());
-}
-
-function normalizeFooterLine(values: Array<string | undefined>): string {
-  return values
-    .map((value) => (value || '').replace(/\s+/g, ' ').trim())
-    .filter(Boolean)
-    .join(' / ');
-}
-
-function fixedBrandLine(materials: PosterMaterials): string {
-  return materials.equipmentName
-    ? `${materials.equipmentName} 활용 안내`
-    : '한양맞춤의약연구원 연구장비 공동활용';
 }
 
 function addAlpha(hex: string, alpha: number): string {
