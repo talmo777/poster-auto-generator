@@ -344,7 +344,7 @@ function buildPosterTextSvg(
     y: 82,
     lineHeight: 72,
     fontSize: 58,
-    weight: 800,
+    weight: 700,
     fill: template.colorScheme.text,
   });
 
