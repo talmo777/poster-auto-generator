@@ -246,7 +246,7 @@ function buildPosterVdom(
       style: {
         display: 'flex',
         width: '100%',
-        height: 380, // Taller image area
+        height: 440, // Increased height to minimize empty space
         background: 'rgba(255,255,255,0.03)',
         borderTopLeftRadius: 18,
         borderTopRightRadius: 18,
