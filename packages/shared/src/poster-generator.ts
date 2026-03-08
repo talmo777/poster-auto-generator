@@ -17,6 +17,9 @@ import type {
   PosterResult,
 } from './types.js';
 import { PROMPT_VERSION } from './copy-generator.js';
+import * as fs from 'fs';
+import * as path from 'path';
+import * as os from 'os';
 
 const IMAGE_FETCH_TIMEOUT_MS = 12000;
 const QR_DARK_COLOR = '#0F172A';
@@ -28,6 +31,42 @@ export function generateSeed(): number {
   return Math.floor(Math.random() * 2147483647);
 }
 
+export async function ensureLocalFont() {
+  const fontDir = path.join(os.tmpdir(), 'poster-fonts');
+  const fontPath = path.join(fontDir, 'NotoSansKR-Regular.otf');
+  const fontConfigPath = path.join(fontDir, 'fonts.conf');
+
+  if (!fs.existsSync(fontDir)) {
+    fs.mkdirSync(fontDir, { recursive: true });
+  }
+
+  if (!fs.existsSync(fontPath)) {
+    console.log(`[PosterGenerator] Downloading font to ${fontPath}...`);
+    const fontUrl = 'https://github.com/googlefonts/noto-cjk/raw/main/Sans/OTF/Korean/NotoSansKR-Regular.otf';
+    try {
+      const response = await fetchWithTimeout(fontUrl, 15000);
+      if (response.ok) {
+        const buffer = await response.arrayBuffer();
+        fs.writeFileSync(fontPath, Buffer.from(buffer));
+        console.log('[PosterGenerator] Font downloaded.');
+      }
+    } catch (e) {
+      console.error('[PosterGenerator] Failed to download font:', e);
+    }
+  }
+
+  if (!fs.existsSync(fontConfigPath)) {
+    const fontConfigXml = `<?xml version="1.0"?>
+<!DOCTYPE fontconfig SYSTEM "fonts.dtd">
+<fontconfig>
+  <dir>${fontDir}</dir>
+</fontconfig>`;
+    fs.writeFileSync(fontConfigPath, fontConfigXml);
+  }
+
+  process.env.FONTCONFIG_PATH = fontDir;
+}
+
 export async function generatePoster(
   copy: PosterCopy,
   template: PosterTemplate,
@@ -35,6 +74,8 @@ export async function generatePoster(
   _geminiApiKey?: string,
   seed?: number,
 ): Promise<PosterResult> {
+  await ensureLocalFont();
+
   const actualSeed = seed ?? generateSeed();
   const { width, height } = getCanvasSize(template.aspectRatio);
 
