@@ -313,7 +313,7 @@ function buildPosterVdom(
     props: {
       style: {
         display: 'flex',
-        marginTop: 90,
+        marginTop: 60,
         width: '100%',
         borderRadius: 20,
         background: 'linear-gradient(135deg, rgba(56,189,248,0.3) 0%, rgba(255,255,255,0.05) 100%)', // gradient border
