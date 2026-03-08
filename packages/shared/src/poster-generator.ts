@@ -20,8 +20,10 @@ import { PROMPT_VERSION } from './copy-generator.js';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
+import { execFileSync } from 'child_process';
 
 const IMAGE_FETCH_TIMEOUT_MS = 12000;
+const FONT_DOWNLOAD_TIMEOUT_MS = 30000;
 const QR_DARK_COLOR = '#0F172A';
 const QR_LIGHT_COLOR = '#FFFFFF';
 const FONT_STACK =
@@ -33,25 +35,36 @@ export function generateSeed(): number {
 
 export async function ensureLocalFont() {
   const fontDir = path.join(os.tmpdir(), 'poster-fonts');
-  const fontPath = path.join(fontDir, 'NotoSansKR-Regular.otf');
   const fontConfigPath = path.join(fontDir, 'fonts.conf');
+
+  const fontFiles = [
+    { name: 'NotoSansKR-Regular.otf', url: 'https://github.com/notofonts/noto-cjk/raw/main/Sans/SubsetOTF/KR/NotoSansKR-Regular.otf' },
+    { name: 'NotoSansKR-Bold.otf', url: 'https://github.com/notofonts/noto-cjk/raw/main/Sans/SubsetOTF/KR/NotoSansKR-Bold.otf' },
+  ];
 
   if (!fs.existsSync(fontDir)) {
     fs.mkdirSync(fontDir, { recursive: true });
   }
 
-  if (!fs.existsSync(fontPath)) {
-    console.log(`[PosterGenerator] Downloading font to ${fontPath}...`);
-    const fontUrl = 'https://github.com/googlefonts/noto-cjk/raw/main/Sans/OTF/Korean/NotoSansKR-Regular.otf';
-    try {
-      const response = await fetchWithTimeout(fontUrl, 15000);
-      if (response.ok) {
-        const buffer = await response.arrayBuffer();
-        fs.writeFileSync(fontPath, Buffer.from(buffer));
-        console.log('[PosterGenerator] Font downloaded.');
+  let fontDownloaded = false;
+
+  for (const font of fontFiles) {
+    const fontPath = path.join(fontDir, font.name);
+    if (!fs.existsSync(fontPath)) {
+      console.log(`[PosterGenerator] Downloading font ${font.name}...`);
+      try {
+        const response = await fetchWithTimeout(font.url, FONT_DOWNLOAD_TIMEOUT_MS);
+        if (response.ok) {
+          const buffer = await response.arrayBuffer();
+          fs.writeFileSync(fontPath, Buffer.from(buffer));
+          console.log(`[PosterGenerator] Font ${font.name} downloaded.`);
+          fontDownloaded = true;
+        } else {
+          console.error(`[PosterGenerator] Font download failed: ${font.name} (HTTP ${response.status})`);
+        }
+      } catch (e) {
+        console.error(`[PosterGenerator] Failed to download font ${font.name}:`, e);
       }
-    } catch (e) {
-      console.error('[PosterGenerator] Failed to download font:', e);
     }
   }
 
@@ -65,6 +78,15 @@ export async function ensureLocalFont() {
   }
 
   process.env.FONTCONFIG_PATH = fontDir;
+
+  if (fontDownloaded) {
+    try {
+      execFileSync('fc-cache', ['-f', fontDir], { timeout: 10000 });
+      console.log('[PosterGenerator] Font cache rebuilt.');
+    } catch (e) {
+      console.warn('[PosterGenerator] fc-cache failed (non-critical):', e);
+    }
+  }
 }
 
 export async function generatePoster(
