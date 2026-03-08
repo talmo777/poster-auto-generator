@@ -86,7 +86,7 @@ async function fetchWithTimeout(url: string, timeoutMs: number): Promise<Respons
   try {
     return await fetch(url, {
       signal: controller.signal,
-      headers: { 'User-Agent': 'poster-auto-generator/2.1' },
+      headers: { 'User-Agent': 'poster-auto-generator/3.0' },
     });
   } finally {
     clearTimeout(timeout);
@@ -117,6 +117,9 @@ function compactText(value: string | undefined | null): string {
   if (!value) return '';
   return value
     .replace(/[\uFFFD□]/g, '')
+    .replace(/[|｜]+/g, '|')
+    .replace(/[“”]/g, '"')
+    .replace(/[‘’]/g, "'")
     .replace(/\s+/g, ' ')
     .replace(/\s*\|\s*/g, ' | ')
     .replace(/\s*,\s*/g, ', ')
@@ -129,18 +132,30 @@ function fixBrokenUnits(value: string): string {
   return value
     .replace(/-\s*90\s*냉각/g, '-90℃ 냉각')
     .replace(/([0-9])\s*[x×]\s*([0-9])/gi, '$1×$2')
-    .replace(/([0-9.]+)\s*m\b/g, '$1m')
     .replace(/([0-9.]+)\s*nm\b/gi, '$1nm')
     .replace(/([0-9.]+)\s*mm\b/gi, '$1mm')
     .replace(/([0-9.]+)\s*cm\b/gi, '$1cm')
     .replace(/([0-9.]+)\s*um\b/gi, '$1μm')
     .replace(/([0-9.]+)\s*μm\b/gi, '$1μm')
     .replace(/([0-9.]+)\s*℃/g, '$1℃')
+    .replace(/([0-9.]+)\s*W\b/g, '$1W')
     .trim();
 }
 
+function isJunkText(value: string | undefined | null): boolean {
+  const v = compactText(value).toLowerCase();
+  if (!v) return true;
+  if (['-', '--', 'n/a', 'na', 'null', 'undefined', '없음'].includes(v)) return true;
+  if (v.includes('업데이트 예정')) return true;
+  if (v === '(박미나)' || v === '박미나') return true;
+  if (v === '|') return true;
+  return false;
+}
+
 function cleanDisplayText(value: string | undefined | null): string {
-  return fixBrokenUnits(compactText(value));
+  const cleaned = fixBrokenUnits(compactText(value));
+  if (isJunkText(cleaned)) return '';
+  return cleaned;
 }
 
 function truncateText(value: string, maxLength: number): string {
@@ -148,48 +163,102 @@ function truncateText(value: string, maxLength: number): string {
   return `${value.slice(0, Math.max(0, maxLength - 1)).trim()}…`;
 }
 
-function buildSpecChips(materials: PosterMaterials): string[] {
-  const candidates = [
-    cleanDisplayText(materials.manufacturer),
-    cleanDisplayText(materials.modelNumber),
-    cleanDisplayText(materials.specification),
-  ].filter(Boolean);
-
-  const chips: string[] = [];
-  for (const value of candidates) {
-    if (chips.length >= 5) break;
-    chips.push(truncateText(value, 34));
+function dedupeParts(values: Array<string | undefined | null>): string[] {
+  const seen = new Set<string>();
+  const results: string[] = [];
+  for (const raw of values) {
+    const value = cleanDisplayText(raw);
+    if (!value) continue;
+    const key = value.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    results.push(value);
   }
-  return chips;
+  return results;
+}
+
+function splitSpecText(value: string): string[] {
+  return cleanDisplayText(value)
+    .split(/\s*\|\s*|\s*\/\s*|,\s*/)
+    .map((part) => cleanDisplayText(part))
+    .filter(Boolean);
+}
+
+function buildEyebrow(copy: PosterCopy, materials: PosterMaterials): string {
+  const candidates = dedupeParts([
+    materials.category,
+    copy.cta,
+    materials.keywords,
+    '한양맞춤의약연구원 보유 장비',
+  ]);
+  return truncateText(candidates[0] || '한양맞춤의약연구원 보유 장비', 22);
+}
+
+function buildDisplayTitle(copy: PosterCopy, materials: PosterMaterials): string {
+  const candidates = dedupeParts([
+    materials.equipmentName,
+    copy.headline,
+    materials.modelNumber,
+  ]);
+  const raw = candidates[0] || '첨단 연구 장비';
+  return truncateText(raw, 30);
+}
+
+function buildDisplaySubtitle(copy: PosterCopy, materials: PosterMaterials): string {
+  const parts = dedupeParts([
+    materials.manufacturer,
+    materials.modelNumber,
+    copy.subheadline,
+  ]);
+  const line = parts.join(' · ');
+  return truncateText(line, 56);
+}
+
+function buildValueBadges(materials: PosterMaterials): string[] {
+  const badges = dedupeParts([
+    materials.manufacturer,
+    materials.modelNumber,
+    ...splitSpecText(materials.specification).slice(0, 6),
+  ]);
+
+  return badges
+    .map((badge) => truncateText(badge, 24))
+    .filter(Boolean)
+    .slice(0, 3);
 }
 
 function normalizeBullets(copy: PosterCopy, materials: PosterMaterials): string[] {
-  const source = copy.bullets
+  const explicit = copy.bullets
     .map((item) => cleanDisplayText(item))
-    .filter(Boolean);
+    .filter(Boolean)
+    .map((item) => truncateText(item, 28));
 
-  const normalized = source
-    .map((item) => truncateText(item, 34))
-    .slice(0, 3);
+  const fallback = splitSpecText(materials.specification)
+    .map((item) => truncateText(item, 28));
 
-  if (normalized.length >= 3) return normalized;
+  const merged = dedupeParts([...explicit, ...fallback]);
+  const selected = merged.slice(0, 3);
 
-  const fallbacks = [
-    cleanDisplayText(materials.specification),
-    cleanDisplayText(materials.modelNumber),
-    cleanDisplayText(materials.manufacturer),
-  ].filter(Boolean);
-
-  for (const fb of fallbacks) {
-    if (normalized.length >= 3) break;
-    normalized.push(truncateText(fb, 34));
+  while (selected.length < 3) {
+    selected.push(['정밀 분석 지원', '연구 효율 향상', '전문 장비 활용'][selected.length]);
   }
 
-  while (normalized.length < 3) {
-    normalized.push('정밀 분석 및 연구 지원');
-  }
+  return selected;
+}
 
-  return normalized;
+function buildFooterLine(prefix: string, value: string | undefined | null, maxLen: number): string {
+  const cleaned = cleanDisplayText(value);
+  if (!cleaned) return '';
+  return truncateText(`${prefix} ${cleaned}`, maxLen);
+}
+
+function buildFooterNote(copy: PosterCopy, materials: PosterMaterials): string {
+  const candidates = dedupeParts([
+    copy.supplementary,
+    materials.priceInfo,
+    '홈페이지에서 장비 상세 정보와 예약 안내를 확인할 수 있습니다.',
+  ]);
+  return truncateText(candidates[0] || '홈페이지에서 장비 상세 정보와 예약 안내를 확인할 수 있습니다.', 72);
 }
 
 function buildPosterVdom(
@@ -200,48 +269,36 @@ function buildPosterVdom(
   heroBase64: string | null,
   qrBase64: string | null,
 ) {
-  const headline = cleanDisplayText(copy.headline);
-  const subheadline = cleanDisplayText(copy.subheadline);
-  const equipmentName = cleanDisplayText(materials.equipmentName) || headline;
-  const categoryLabel = cleanDisplayText(materials.category || copy.cta || '');
-  const specLine = [
-    cleanDisplayText(materials.equipmentName),
-    cleanDisplayText(materials.modelNumber),
-    cleanDisplayText(materials.manufacturer),
-  ].filter(Boolean).join(' | ');
+  const isStory = height > 1600;
 
-  const specChips = buildSpecChips(materials);
+  const eyebrow = buildEyebrow(copy, materials);
+  const title = buildDisplayTitle(copy, materials);
+  const subtitle = buildDisplaySubtitle(copy, materials);
+  const badges = buildValueBadges(materials);
   const bullets = normalizeBullets(copy, materials);
 
-  const locationLine = cleanDisplayText(materials.location ? `설치장소 ${materials.location}` : '');
-  const contactLine = cleanDisplayText(materials.contact ? `문의 및 예약 ${materials.contact}` : '');
-  const priceLine = cleanDisplayText(materials.priceInfo || '');
-  const footerMsg = cleanDisplayText(
-    copy.supplementary || '홈페이지에서 장비 상세 정보와 사용 안내를 확인할 수 있습니다.'
-  );
+  const locationLine = buildFooterLine('설치장소', materials.location, 34);
+  const contactLine = buildFooterLine('문의 및 예약', materials.contact, 54);
+  const footerNote = buildFooterNote(copy, materials);
 
-  const headlineLength = headline.length;
-  const hasLongHeadline = headlineLength >= 20;
-  const hasVeryLongHeadline = headlineLength >= 28;
+  const titleLength = title.length;
+  const titleFontSize = isStory ? (titleLength >= 24 ? 66 : 74) : (titleLength >= 24 ? 54 : 62);
+  const titleLineHeight = titleLength >= 24 ? 1.03 : 1.08;
+  const heroHeight = isStory ? 650 : 430;
+  const footerQrSize = isStory ? 132 : 108;
+  const outerPaddingX = isStory ? 56 : 52;
+  const outerPaddingY = isStory ? 58 : 46;
+  const bulletFontSize = isStory ? 28 : 22;
+  const bulletDotSize = isStory ? 13 : 11;
+  const bulletGap = isStory ? 24 : 16;
 
-  const headlineFontSize = hasVeryLongHeadline ? 56 : hasLongHeadline ? 64 : 72;
-  const headlineLineHeight = hasVeryLongHeadline ? 1.04 : 1.08;
-  const subheadlineFontSize = hasVeryLongHeadline ? 18 : 20;
-  const heroHeight = hasVeryLongHeadline ? 360 : hasLongHeadline ? 390 : 420;
-  const imageInset = hasVeryLongHeadline ? 18 : 20;
-  const bulletCardMarginTop = hasVeryLongHeadline ? 24 : 30;
-  const footerTitleFontSize = 18;
-  const footerMetaFontSize = 15;
-  const footerNoteFontSize = 13;
-  const qrSize = 104;
-
-  const bulletElements = bullets.map((b, i) => ({
+  const bulletElements = bullets.map((bullet, index) => ({
     type: 'div',
     props: {
       style: {
         display: 'flex',
         alignItems: 'flex-start',
-        marginBottom: i === bullets.length - 1 ? 0 : 16,
+        marginBottom: index === bullets.length - 1 ? 0 : bulletGap,
       },
       children: [
         {
@@ -249,13 +306,13 @@ function buildPosterVdom(
           props: {
             style: {
               display: 'flex',
-              width: 12,
-              height: 12,
+              width: bulletDotSize,
+              height: bulletDotSize,
               borderRadius: 999,
-              backgroundColor: '#7C3AED',
+              background: 'linear-gradient(135deg, #7C3AED, #C084FC)',
+              marginTop: isStory ? 10 : 9,
               flexShrink: 0,
-              marginTop: 9,
-              boxShadow: '0 0 0 4px rgba(168,85,247,0.14)',
+              boxShadow: '0 0 0 5px rgba(168,85,247,0.16)',
             },
             children: [],
           },
@@ -265,85 +322,114 @@ function buildPosterVdom(
           props: {
             style: {
               display: 'flex',
-              fontSize: 22,
-              fontWeight: 700,
-              color: 'white',
               marginLeft: 16,
-              flex: 1,
-              lineHeight: 1.4,
+              color: '#F8FAFC',
+              fontSize: bulletFontSize,
+              fontWeight: 800,
+              lineHeight: 1.35,
               wordBreak: 'keep-all' as const,
+              flex: 1,
             },
-            children: b,
+            children: bullet,
           },
         },
       ],
     },
   }));
 
-  const chipElements = specChips.slice(0, 5).map((chip) => ({
+  const badgeElements = badges.map((badge) => ({
     type: 'div',
     props: {
       style: {
         display: 'flex',
-        padding: '10px 18px',
+        padding: isStory ? '12px 20px' : '10px 18px',
         borderRadius: 999,
-        background: 'rgba(255,255,255,0.96)',
-        color: '#111827',
-        fontSize: 14,
-        fontWeight: 700,
-        lineHeight: 1.2,
-        marginRight: 12,
-        marginBottom: 12,
-        border: '1px solid rgba(148,163,184,0.28)',
+        background: 'rgba(255,255,255,0.97)',
+        color: '#0F172A',
+        fontSize: isStory ? 18 : 15,
+        fontWeight: 800,
+        marginRight: 10,
+        marginBottom: 10,
+        border: '1px solid rgba(148,163,184,0.24)',
       },
-      children: chip,
+      children: badge,
     },
   }));
 
-  const heroElement = heroBase64
-    ? {
-        type: 'img',
-        props: {
-          src: heroBase64,
-          style: {
-            width: '100%',
-            height: '100%',
-            objectFit: 'contain' as const,
-            borderRadius: 24,
-            background: '#F8FAFC',
-          },
-        },
-      }
-    : {
-        type: 'div',
-        props: {
-          style: {
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            width: '100%',
-            height: '100%',
-            background: 'rgba(15,23,42,0.92)',
-            borderRadius: 24,
-            color: '#94A3B8',
-            fontSize: 22,
-            fontWeight: 700,
-          },
-          children: 'IMAGE PREVIEW',
-        },
-      };
+  const heroCardChildren: any[] = [];
 
-  const contactChildren: any[] = [];
+  if (heroBase64) {
+    heroCardChildren.push({
+      type: 'img',
+      props: {
+        src: heroBase64,
+        style: {
+          position: 'absolute' as const,
+          inset: 0,
+          width: '100%',
+          height: '100%',
+          objectFit: 'cover' as const,
+          opacity: 0.18,
+        },
+      },
+    });
+  }
+
+  heroCardChildren.push({
+    type: 'div',
+    props: {
+      style: {
+        display: 'flex',
+        position: 'relative' as const,
+        width: '100%',
+        height: '100%',
+        borderRadius: 30,
+        background: 'linear-gradient(180deg, rgba(255,255,255,0.96) 0%, rgba(241,245,249,0.96) 100%)',
+        border: '1px solid rgba(255,255,255,0.55)',
+        overflow: 'hidden',
+        alignItems: 'center',
+        justifyContent: 'center',
+        boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.8)',
+      },
+      children: heroBase64
+        ? [{
+            type: 'img',
+            props: {
+              src: heroBase64,
+              style: {
+                width: '100%',
+                height: '100%',
+                objectFit: 'contain' as const,
+                padding: isStory ? '28px' : '24px',
+              },
+            },
+          }]
+        : [{
+            type: 'div',
+            props: {
+              style: {
+                display: 'flex',
+                color: '#64748B',
+                fontSize: isStory ? 24 : 20,
+                fontWeight: 700,
+              },
+              children: '장비 이미지 준비 중',
+            },
+          }],
+    },
+  });
+
+  const footerLeftChildren: any[] = [];
   if (locationLine) {
-    contactChildren.push({
+    footerLeftChildren.push({
       type: 'div',
       props: {
         style: {
           display: 'flex',
-          fontSize: footerTitleFontSize,
-          fontWeight: 700,
           color: '#F8FAFC',
-          lineHeight: 1.32,
+          fontSize: isStory ? 24 : 18,
+          fontWeight: 800,
+          lineHeight: 1.35,
           wordBreak: 'keep-all' as const,
         },
         children: locationLine,
@@ -351,244 +437,47 @@ function buildPosterVdom(
     });
   }
   if (contactLine) {
-    contactChildren.push({
+    footerLeftChildren.push({
       type: 'div',
       props: {
         style: {
           display: 'flex',
-          fontSize: footerTitleFontSize,
-          fontWeight: 700,
           color: '#F8FAFC',
+          fontSize: isStory ? 24 : 18,
+          fontWeight: 800,
+          lineHeight: 1.35,
           marginTop: 4,
-          lineHeight: 1.32,
           wordBreak: 'keep-all' as const,
         },
         children: contactLine,
       },
     });
   }
-  if (priceLine) {
-    contactChildren.push({
-      type: 'div',
-      props: {
-        style: {
-          display: 'flex',
-          fontSize: footerMetaFontSize,
-          fontWeight: 400,
-          color: '#CBD5E1',
-          marginTop: 8,
-          lineHeight: 1.34,
-          wordBreak: 'keep-all' as const,
-        },
-        children: truncateText(priceLine, 88),
+  footerLeftChildren.push({
+    type: 'div',
+    props: {
+      style: {
+        display: 'flex',
+        color: '#94A3B8',
+        fontSize: isStory ? 16 : 13,
+        fontWeight: 400,
+        lineHeight: 1.35,
+        marginTop: 10,
+        maxWidth: qrBase64 ? '92%' : '100%',
       },
-    });
-  }
-
-  const qrElement = qrBase64
-    ? {
-        type: 'div',
-        props: {
-          style: {
-            display: 'flex',
-            flexDirection: 'column' as const,
-            alignItems: 'center',
-            marginLeft: 24,
-            flexShrink: 0,
-          },
-          children: [
-            {
-              type: 'div',
-              props: {
-                style: {
-                  display: 'flex',
-                  padding: 10,
-                  background: 'white',
-                  borderRadius: 16,
-                  border: '2px solid rgba(124,58,237,0.24)',
-                  boxShadow: '0 12px 30px rgba(2,6,23,0.22)',
-                },
-                children: [{
-                  type: 'img',
-                  props: { src: qrBase64, width: qrSize, height: qrSize },
-                }],
-              },
-            },
-            {
-              type: 'div',
-              props: {
-                style: {
-                  fontSize: 14,
-                  fontWeight: 700,
-                  marginTop: 8,
-                  color: '#CBD5E1',
-                },
-                children: '홈페이지 바로가기',
-              },
-            },
-          ],
-        },
-      }
-    : null;
-
-  const contentChildren: any[] = [];
-
-  const headlineChildren: any[] = [
-    {
-      type: 'div',
-      props: {
-        style: {
-          display: 'flex',
-          fontSize: headlineFontSize,
-          fontWeight: 900,
-          lineHeight: headlineLineHeight,
-          color: 'white',
-          textAlign: 'center' as const,
-          padding: '0 20px',
-          letterSpacing: -1.6,
-          wordBreak: 'keep-all' as const,
-          justifyContent: 'center',
-        },
-        children: headline,
-      },
+      children: footerNote,
     },
-  ];
+  });
 
-  if (subheadline) {
-    headlineChildren.push({
-      type: 'div',
-      props: {
-        style: {
-          display: 'flex',
-          fontSize: subheadlineFontSize,
-          fontWeight: 400,
-          color: '#CBD5E1',
-          marginTop: 10,
-          lineHeight: 1.3,
-          textAlign: 'center' as const,
-          padding: '0 48px',
-          wordBreak: 'keep-all' as const,
-          justifyContent: 'center',
-        },
-        children: subheadline,
-      },
-    });
-  }
-
-  contentChildren.push({
+  const qrElement = qrBase64 ? {
     type: 'div',
     props: {
       style: {
         display: 'flex',
         flexDirection: 'column' as const,
         alignItems: 'center',
-        width: '100%',
-      },
-      children: headlineChildren,
-    },
-  });
-
-  const heroCardChildren: any[] = [
-    {
-      type: 'div',
-      props: {
-        style: {
-          display: 'flex',
-          width: '100%',
-          height: heroHeight,
-          background: 'rgba(255,255,255,0.76)',
-          borderRadius: 28,
-          overflow: 'hidden',
-          padding: imageInset,
-        },
-        children: [heroElement],
-      },
-    },
-  ];
-
-  if (specLine) {
-    heroCardChildren.push({
-      type: 'div',
-      props: {
-        style: {
-          display: 'flex',
-          width: '100%',
-          alignItems: 'center',
-          justifyContent: 'center',
-          padding: '16px 18px 0 18px',
-        },
-        children: [{
-          type: 'div',
-          props: {
-            style: {
-              display: 'flex',
-              width: '100%',
-              justifyContent: 'center',
-              alignItems: 'center',
-              padding: '16px 18px',
-              borderRadius: 18,
-              background: 'rgba(255,255,255,0.94)',
-              color: '#111827',
-              fontSize: 15,
-              fontWeight: 700,
-              lineHeight: 1.3,
-              textAlign: 'center' as const,
-              wordBreak: 'keep-all' as const,
-            },
-            children: truncateText(specLine, 100),
-          },
-        }],
-      },
-    });
-  }
-
-  if (chipElements.length > 0) {
-    heroCardChildren.push({
-      type: 'div',
-      props: {
-        style: {
-          display: 'flex',
-          width: '100%',
-          flexWrap: 'wrap' as const,
-          justifyContent: 'center',
-          alignItems: 'center',
-          padding: '16px 6px 0 6px',
-        },
-        children: chipElements,
-      },
-    });
-  }
-
-  contentChildren.push({
-    type: 'div',
-    props: {
-      style: {
-        display: 'flex',
-        flexDirection: 'column' as const,
-        marginTop: 22,
-        width: '100%',
-        borderRadius: 28,
-        background: 'linear-gradient(180deg, rgba(148,163,184,0.34) 0%, rgba(30,41,59,0.88) 100%)',
-        padding: 18,
-        boxShadow: '0 24px 60px rgba(2,6,23,0.28)',
-      },
-      children: heroCardChildren,
-    },
-  });
-
-  contentChildren.push({
-    type: 'div',
-    props: {
-      style: {
-        display: 'flex',
-        marginTop: bulletCardMarginTop,
-        width: '100%',
-        borderRadius: 24,
-        background: 'rgba(2,6,23,0.54)',
-        border: '1px solid rgba(148,163,184,0.22)',
-        padding: '30px 32px',
-        position: 'relative' as const,
-        boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.06)',
+        marginLeft: 22,
+        flexShrink: 0,
       },
       children: [
         {
@@ -596,16 +485,16 @@ function buildPosterVdom(
           props: {
             style: {
               display: 'flex',
-              position: 'absolute' as const,
-              top: -12,
-              left: 24,
-              width: 48,
-              height: 48,
-              borderRadius: 24,
-              background: 'linear-gradient(135deg, #A855F7, #F0ABFC)',
-              opacity: 0.9,
+              padding: 10,
+              background: 'rgba(255,255,255,0.98)',
+              borderRadius: 18,
+              border: '1px solid rgba(196,181,253,0.48)',
+              boxShadow: '0 12px 30px rgba(2,6,23,0.24)',
             },
-            children: [],
+            children: [{
+              type: 'img',
+              props: { src: qrBase64, width: footerQrSize, height: footerQrSize },
+            }],
           },
         },
         {
@@ -613,111 +502,51 @@ function buildPosterVdom(
           props: {
             style: {
               display: 'flex',
-              flexDirection: 'column' as const,
-              width: '100%',
+              fontSize: isStory ? 16 : 14,
+              fontWeight: 700,
+              color: '#CBD5E1',
               marginTop: 8,
             },
-            children: bulletElements,
+            children: '홈페이지 바로가기',
           },
         },
       ],
     },
-  });
+  } : null;
 
-  contentChildren.push({
-    type: 'div',
-    props: { style: { display: 'flex', flexGrow: 1 }, children: [] },
-  });
+  const children: any[] = [];
 
-  const footerRowChildren: any[] = [
-    {
-      type: 'div',
-      props: {
-        style: {
-          display: 'flex',
-          flexDirection: 'column' as const,
-          flex: 1,
-          paddingRight: 16,
-          minWidth: 0,
-        },
-        children: contactChildren,
-      },
-    },
-  ];
-
-  if (qrElement) footerRowChildren.push(qrElement);
-
-  contentChildren.push({
-    type: 'div',
-    props: {
-      style: {
-        display: 'flex',
-        justifyContent: 'space-between',
-        alignItems: 'flex-end',
-        marginTop: 18,
-      },
-      children: footerRowChildren,
-    },
-  });
-
-  if (footerMsg) {
-    contentChildren.push({
-      type: 'div',
-      props: {
-        style: { display: 'flex', marginTop: 10 },
-        children: [{
-          type: 'div',
-          props: {
-            style: {
-              display: 'flex',
-              fontSize: footerNoteFontSize,
-              fontWeight: 400,
-              color: '#94A3B8',
-              lineHeight: 1.32,
-            },
-            children: truncateText(footerMsg, 118),
-          },
-        }],
-      },
-    });
-  }
-
-  const decorativeChildren: any[] = [];
-
-  decorativeChildren.push({
+  children.push({
     type: 'div',
     props: {
       style: {
         display: 'flex',
         position: 'absolute' as const,
-        top: 0,
-        left: 0,
-        right: 0,
-        bottom: 0,
-        background: 'linear-gradient(135deg, rgba(2,6,23,0.95) 0%, rgba(8,15,46,0.96) 48%, rgba(3,7,18,0.98) 100%)',
+        inset: 0,
+        background: 'linear-gradient(135deg, rgba(2,6,23,0.94) 0%, rgba(7,16,56,0.94) 45%, rgba(1,8,26,0.97) 100%)',
       },
       children: [],
     },
   });
 
-  decorativeChildren.push({
+  children.push({
     type: 'div',
     props: {
       style: {
         display: 'flex',
         position: 'absolute' as const,
-        top: -100,
-        right: -140,
-        width: 460,
-        height: 260,
+        top: -80,
+        right: -120,
+        width: isStory ? 520 : 420,
+        height: isStory ? 280 : 240,
         transform: 'rotate(24deg)',
-        background: 'linear-gradient(135deg, rgba(56,189,248,0.06), rgba(168,85,247,0.18))',
+        background: 'linear-gradient(135deg, rgba(56,189,248,0.10), rgba(168,85,247,0.18))',
       },
       children: [],
     },
   });
 
-  decorativeChildren.push({
+  children.push({
     type: 'div',
     props: {
       style: {
@@ -727,14 +556,14 @@ function buildPosterVdom(
         left: 24,
         right: 24,
         bottom: 24,
-        border: '1px solid rgba(148,163,184,0.22)',
-        borderRadius: 28,
+        borderRadius: 30,
+        border: '1px solid rgba(148,163,184,0.20)',
       },
       children: [],
     },
   });
 
-  decorativeChildren.push({
+  children.push({
     type: 'div',
     props: {
       style: {
@@ -742,62 +571,227 @@ function buildPosterVdom(
         position: 'absolute' as const,
         top: 40,
         right: 36,
-        width: 70,
-        height: 70,
+        width: isStory ? 76 : 68,
+        height: isStory ? 76 : 68,
         borderRadius: 999,
-        background: 'linear-gradient(135deg, #A855F7, #F0ABFC)',
-        opacity: 0.9,
+        background: 'linear-gradient(135deg, rgba(168,85,247,0.95), rgba(216,180,254,0.92))',
       },
       children: [],
     },
   });
 
-  decorativeChildren.push({
+  children.push({
     type: 'div',
     props: {
       style: {
         display: 'flex',
         position: 'absolute' as const,
-        top: 50,
-        right: 46,
-        width: 50,
-        height: 50,
+        top: 49,
+        right: 45,
+        width: isStory ? 58 : 50,
+        height: isStory ? 58 : 50,
         borderRadius: 999,
-        border: '3px solid rgba(255,255,255,0.22)',
+        border: '3px solid rgba(255,255,255,0.20)',
       },
       children: [],
     },
   });
 
-  const contentLayer = {
+  const contentChildren: any[] = [];
+
+  contentChildren.push({
+    type: 'div',
+    props: {
+      style: {
+        display: 'flex',
+        alignItems: 'center',
+        alignSelf: 'center',
+        padding: isStory ? '10px 18px' : '8px 16px',
+        borderRadius: 999,
+        background: 'rgba(15,23,42,0.52)',
+        border: '1px solid rgba(148,163,184,0.22)',
+        color: '#C4B5FD',
+        fontSize: isStory ? 16 : 13,
+        fontWeight: 800,
+        letterSpacing: 0.4,
+      },
+      children: eyebrow,
+    },
+  });
+
+  contentChildren.push({
+    type: 'div',
+    props: {
+      style: {
+        display: 'flex',
+        marginTop: 18,
+        color: '#FFFFFF',
+        fontSize: titleFontSize,
+        fontWeight: 900,
+        lineHeight: titleLineHeight,
+        textAlign: 'center' as const,
+        justifyContent: 'center',
+        letterSpacing: -1.8,
+        wordBreak: 'keep-all' as const,
+      },
+      children: title,
+    },
+  });
+
+  if (subtitle) {
+    contentChildren.push({
+      type: 'div',
+      props: {
+        style: {
+          display: 'flex',
+          marginTop: 10,
+          color: '#CBD5E1',
+          fontSize: isStory ? 20 : 18,
+          fontWeight: 500,
+          lineHeight: 1.35,
+          textAlign: 'center' as const,
+          justifyContent: 'center',
+          wordBreak: 'keep-all' as const,
+          padding: '0 40px',
+        },
+        children: subtitle,
+      },
+    });
+  }
+
+  contentChildren.push({
     type: 'div',
     props: {
       style: {
         display: 'flex',
         flexDirection: 'column' as const,
-        padding: '38px 52px 52px 52px',
+        width: '100%',
+        marginTop: isStory ? 26 : 24,
+        padding: isStory ? '20px' : '18px',
+        borderRadius: 30,
+        background: 'linear-gradient(180deg, rgba(71,85,105,0.58) 0%, rgba(30,41,59,0.90) 100%)',
+        boxShadow: '0 28px 70px rgba(2,6,23,0.32)',
+      },
+      children: [
+        {
+          type: 'div',
+          props: {
+            style: {
+              display: 'flex',
+              width: '100%',
+              height: heroHeight,
+              position: 'relative' as const,
+              borderRadius: 30,
+              overflow: 'hidden',
+            },
+            children: heroCardChildren,
+          },
+        },
+        ...(badgeElements.length > 0 ? [{
+          type: 'div',
+          props: {
+            style: {
+              display: 'flex',
+              flexWrap: 'wrap' as const,
+              alignItems: 'center',
+              justifyContent: 'center',
+              padding: isStory ? '18px 6px 2px 6px' : '16px 6px 0 6px',
+            },
+            children: badgeElements,
+          },
+        }] : []),
+      ],
+    },
+  });
+
+  contentChildren.push({
+    type: 'div',
+    props: {
+      style: {
+        display: 'flex',
+        marginTop: isStory ? 24 : 22,
+        width: '100%',
+        borderRadius: 26,
+        background: 'rgba(2,6,23,0.54)',
+        border: '1px solid rgba(148,163,184,0.18)',
+        padding: isStory ? '34px 34px' : '28px 30px',
+        boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.04)',
+      },
+      children: [{
+        type: 'div',
+        props: {
+          style: {
+            display: 'flex',
+            flexDirection: 'column' as const,
+            width: '100%',
+          },
+          children: bulletElements,
+        },
+      }],
+    },
+  });
+
+  contentChildren.push({
+    type: 'div',
+    props: {
+      style: {
+        display: 'flex',
+        marginTop: isStory ? 26 : 24,
+        padding: isStory ? '22px 24px' : '18px 20px',
+        borderRadius: 22,
+        background: 'rgba(2,6,23,0.34)',
+        border: '1px solid rgba(148,163,184,0.12)',
+        justifyContent: 'space-between',
+        alignItems: 'flex-end',
+      },
+      children: [
+        {
+          type: 'div',
+          props: {
+            style: {
+              display: 'flex',
+              flexDirection: 'column' as const,
+              flex: 1,
+              minWidth: 0,
+              paddingRight: qrBase64 ? 14 : 0,
+            },
+            children: footerLeftChildren,
+          },
+        },
+        ...(qrElement ? [qrElement] : []),
+      ],
+    },
+  });
+
+  children.push({
+    type: 'div',
+    props: {
+      style: {
+        display: 'flex',
+        flexDirection: 'column' as const,
+        width: '100%',
         height: '100%',
         position: 'relative' as const,
         zIndex: 10,
+        padding: `${outerPaddingY}px ${outerPaddingX}px ${outerPaddingY}px ${outerPaddingX}px`,
       },
       children: contentChildren,
     },
-  };
+  });
 
   return {
     type: 'div',
     props: {
       style: {
         display: 'flex',
-        flexDirection: 'column' as const,
         width,
         height,
-        color: 'white',
+        color: '#FFFFFF',
         fontFamily: 'Noto Sans KR',
         position: 'relative' as const,
         overflow: 'hidden',
       },
-      children: [...decorativeChildren, contentLayer],
+      children,
     },
   };
 }
@@ -825,7 +819,7 @@ export async function generatePoster(
           type: 'png',
           errorCorrectionLevel: 'M',
           margin: 0,
-          width: 140,
+          width: 160,
           color: { dark: QR_DARK_COLOR, light: QR_LIGHT_COLOR },
         })
       : null,
@@ -840,8 +834,8 @@ export async function generatePoster(
       const bgArrayBuffer = await res.arrayBuffer();
       blurredBgBuffer = await sharp(Buffer.from(bgArrayBuffer))
         .resize(width, height, { fit: 'cover' })
-        .modulate({ brightness: 0.22, saturation: 1.2 })
-        .blur(80)
+        .modulate({ brightness: 0.18, saturation: 1.15 })
+        .blur(82)
         .png()
         .toBuffer();
     } catch {
