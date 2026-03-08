@@ -27,31 +27,45 @@ const QR_LIGHT_COLOR = '#FFFFFF';
 const FONT_STACK =
   "Noto Sans KR, Apple SD Gothic Neo, Malgun Gothic, NanumGothic, sans-serif";
 
+const FONT_FILES = [
+  {
+    filename: 'NotoSansKR-Regular.otf',
+    url: 'https://github.com/notofonts/noto-cjk/raw/main/Sans/SubsetOTF/KR/NotoSansKR-Regular.otf',
+  },
+  {
+    filename: 'NotoSansKR-Bold.otf',
+    url: 'https://github.com/notofonts/noto-cjk/raw/main/Sans/SubsetOTF/KR/NotoSansKR-Bold.otf',
+  },
+];
+
 export function generateSeed(): number {
   return Math.floor(Math.random() * 2147483647);
 }
 
 export async function ensureLocalFont() {
   const fontDir = path.join(os.tmpdir(), 'poster-fonts');
-  const fontPath = path.join(fontDir, 'NotoSansKR-Regular.otf');
   const fontConfigPath = path.join(fontDir, 'fonts.conf');
 
   if (!fs.existsSync(fontDir)) {
     fs.mkdirSync(fontDir, { recursive: true });
   }
 
-  if (!fs.existsSync(fontPath)) {
-    console.log(`[PosterGenerator] Downloading font to ${fontPath}...`);
-    const fontUrl = 'https://github.com/googlefonts/noto-cjk/raw/main/Sans/OTF/Korean/NotoSansKR-Regular.otf';
-    try {
-      const response = await fetchWithTimeout(fontUrl, 15000);
-      if (response.ok) {
-        const buffer = await response.arrayBuffer();
-        fs.writeFileSync(fontPath, Buffer.from(buffer));
-        console.log('[PosterGenerator] Font downloaded.');
+  for (const font of FONT_FILES) {
+    const fontPath = path.join(fontDir, font.filename);
+    if (!fs.existsSync(fontPath)) {
+      console.log(`[PosterGenerator] Downloading ${font.filename} to ${fontPath}...`);
+      try {
+        const response = await fetchWithTimeout(font.url, 30000);
+        if (response.ok) {
+          const buffer = await response.arrayBuffer();
+          fs.writeFileSync(fontPath, Buffer.from(buffer));
+          console.log(`[PosterGenerator] ${font.filename} downloaded.`);
+        } else {
+          console.error(`[PosterGenerator] Font download failed for ${font.filename} with status ${response.status}: ${font.url}`);
+        }
+      } catch (e) {
+        console.error(`[PosterGenerator] Failed to download ${font.filename}:`, e);
       }
-    } catch (e) {
-      console.error('[PosterGenerator] Failed to download font:', e);
     }
   }
 
@@ -660,7 +674,7 @@ function withSvgDocument(svgBody: string): string {
 }
 
 function svgToBuffer(svg: string): Buffer {
-  return Buffer.from(`\uFEFF${svg}`, 'utf8');
+  return Buffer.from(svg, 'utf8');
 }
 
 async function fetchWithTimeout(url: string, timeoutMs: number): Promise<Response> {
