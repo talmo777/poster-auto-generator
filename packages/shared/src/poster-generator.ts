@@ -313,7 +313,7 @@ function buildPosterVdom(
     props: {
       style: {
         display: 'flex',
-        marginTop: 120,
+        marginTop: 90,
         width: '100%',
         borderRadius: 20,
         background: 'linear-gradient(135deg, rgba(56,189,248,0.3) 0%, rgba(255,255,255,0.05) 100%)', // gradient border
@@ -332,7 +332,7 @@ function buildPosterVdom(
         {
           type: 'div',
           props: {
-            style: { display: 'flex', flexDirection: 'column' as const, width: '100%', padding: '36px 40px', borderRadius: 18, background: 'rgba(15,23,42,0.85)' },
+            style: { display: 'flex', flexDirection: 'column' as const, width: '100%', padding: '54px 40px', borderRadius: 18, background: 'rgba(15,23,42,0.85)' },
             children: bulletElements,
           }
         }
