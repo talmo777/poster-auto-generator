@@ -177,7 +177,7 @@ function dedupeParts(values: Array<string | undefined | null>): string[] {
   return results;
 }
 
-function splitSpecText(value: string): string[] {
+function splitSpecText(value: string | undefined | null): string[] {
   return cleanDisplayText(value)
     .split(/\s*\|\s*|\s*\/\s*|,\s*/)
     .map((part) => cleanDisplayText(part))
