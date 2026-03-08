@@ -131,22 +131,22 @@ function buildPosterVdom(
   const footerMsg = copy.supplementary || '맞춤의약연구원에서 사용요금을 내고 사용 가능하며, 예약은 맞춤의약연구원 회원가입 후 예약하여 담당교수님 확인 완료 후 사용 가능합니다.';
 
   // Build bullet elements
-  const bulletElements = copy.bullets.slice(0, 3).map(b => ({
+  const bulletElements = copy.bullets.slice(0, 3).map((b, i) => ({
     type: 'div',
     props: {
-      style: { display: 'flex', alignItems: 'center', marginBottom: 14 },
+      style: { display: 'flex', alignItems: 'flex-start', marginBottom: i === 2 ? 0 : 20 },
       children: [
         {
           type: 'div',
           props: {
-            style: { display: 'flex', width: 14, height: 14, borderRadius: 7, backgroundColor: '#38BDF8', flexShrink: 0 },
+            style: { display: 'flex', width: 14, height: 14, borderRadius: 7, backgroundColor: '#38BDF8', flexShrink: 0, marginTop: 8 },
             children: [],
           },
         },
         {
           type: 'div',
           props: {
-            style: { fontSize: 26, fontWeight: 700, color: 'white', marginLeft: 18 },
+            style: { fontSize: 24, fontWeight: 700, color: 'white', marginLeft: 16, flex: 1, lineHeight: 1.4 },
             children: b,
           },
         },
@@ -175,15 +175,15 @@ function buildPosterVdom(
   const contactChildren: any[] = [];
   if (locationLine) contactChildren.push({
     type: 'div',
-    props: { style: { fontSize: 20, fontWeight: 700, color: '#E2E8F0', lineHeight: 1.4 }, children: locationLine },
+    props: { style: { display: 'flex', fontSize: 22, fontWeight: 700, color: '#F8FAFC', lineHeight: 1.4 }, children: locationLine },
   });
   if (contactLine) contactChildren.push({
     type: 'div',
-    props: { style: { fontSize: 20, fontWeight: 700, color: '#E2E8F0', marginTop: 6, lineHeight: 1.4 }, children: contactLine },
+    props: { style: { display: 'flex', fontSize: 22, fontWeight: 700, color: '#F8FAFC', marginTop: 6, lineHeight: 1.4 }, children: contactLine },
   });
   if (priceLine) contactChildren.push({
     type: 'div',
-    props: { style: { fontSize: 20, fontWeight: 700, color: '#E2E8F0', marginTop: 6, lineHeight: 1.4 }, children: priceLine },
+    props: { style: { display: 'flex', fontSize: 22, fontWeight: 700, color: '#F8FAFC', marginTop: 6, lineHeight: 1.4 }, children: priceLine },
   });
 
   // QR element
@@ -218,82 +218,72 @@ function buildPosterVdom(
   // Top-level content children
   const contentChildren: any[] = [];
 
-  // 1. Headline section
+  // 1. Headline section (Centered)
   const headlineChildren: any[] = [];
-  // Category label above headline (like reference)
-  if (categoryLabel) {
-    headlineChildren.push({
-      type: 'div',
-      props: {
-        style: { fontSize: 18, fontWeight: 900, color: '#38BDF8', letterSpacing: 4, marginBottom: 16, textTransform: 'uppercase' as const },
-        children: categoryLabel,
-      },
-    });
-  }
   headlineChildren.push({
     type: 'div',
     props: {
-      style: { fontSize: 60, fontWeight: 900, lineHeight: 1.15, color: 'white' },
+      style: { display: 'flex', fontSize: 52, fontWeight: 900, lineHeight: 1.25, color: 'white', textAlign: 'center' as const, zIndex: 10, padding: '0 20px', wordBreak: 'keep-all' as const },
       children: headline,
     },
   });
-  // Subheadline
+  // Subheadline (English thin subheadline right below)
   if (subheadline) {
     headlineChildren.push({
       type: 'div',
       props: {
-        style: { fontSize: 24, fontWeight: 400, color: '#94A3B8', marginTop: 12, lineHeight: 1.4 },
+        style: { display: 'flex', fontSize: 24, fontWeight: 400, color: '#CBD5E1', marginTop: 14, lineHeight: 1.4, textAlign: 'center' as const, zIndex: 10, padding: '0 40px', wordBreak: 'keep-all' as const },
         children: subheadline,
       },
     });
   }
   contentChildren.push({
     type: 'div',
-    props: { style: { display: 'flex', flexDirection: 'column' as const }, children: headlineChildren },
+    props: { style: { display: 'flex', flexDirection: 'column' as const, alignItems: 'center', width: '100%' }, children: headlineChildren },
   });
 
-  // 2. Hero image card
-  contentChildren.push({
+  // 2. Hero image card with Spec badge inside bottom
+  const heroCardChildren: any[] = [];
+  heroCardChildren.push({
     type: 'div',
     props: {
       style: {
         display: 'flex',
-        marginTop: 28,
         width: '100%',
-        height: 330, // Reduced from 380 to give more bottom space
-        borderRadius: 24,
+        height: 340, // Image area
+        background: 'white',
+        borderTopLeftRadius: 18,
+        borderTopRightRadius: 18,
+        borderBottomLeftRadius: specText ? 0 : 18,
+        borderBottomRightRadius: specText ? 0 : 18,
         overflow: 'hidden',
-        background: 'white', // White background for contain
-        border: '2px solid rgba(255,255,255,0.12)',
-        flexShrink: 1,
       },
       children: [heroElement],
     },
   });
 
-  // 3. Spec badge
   if (specText) {
-    contentChildren.push({
+    heroCardChildren.push({
       type: 'div',
       props: {
         style: {
           display: 'flex',
+          width: '100%',
           alignItems: 'center',
-          marginTop: 16,
-          padding: '14px 28px',
-          background: 'rgba(255,255,255,0.92)',
-          borderRadius: 14,
-          maxWidth: '100%',
+          justifyContent: 'center',
+          padding: '16px 20px',
+          background: 'rgba(226, 232, 240, 0.95)', // light grey bar
+          borderBottomLeftRadius: 18,
+          borderBottomRightRadius: 18,
         },
         children: [{
           type: 'div',
-          props: { style: { fontSize: 20, fontWeight: 700, color: '#0F172A', lineHeight: 1.4 }, children: specText },
+          props: { style: { display: 'flex', fontSize: 20, fontWeight: 700, color: '#0F172A', textAlign: 'center' as const, lineHeight: 1.4 }, children: specText },
         }],
       },
     });
   }
 
-  // 4. Bullet points card
   contentChildren.push({
     type: 'div',
     props: {
@@ -301,12 +291,54 @@ function buildPosterVdom(
         display: 'flex',
         flexDirection: 'column' as const,
         marginTop: 24,
-        padding: '32px 36px',
-        borderRadius: 24,
-        background: 'rgba(30,58,95,0.35)',
-        border: '2px solid rgba(56,189,248,0.2)',
+        width: '100%',
+        borderRadius: 20,
+        background: 'linear-gradient(135deg, rgba(255,255,255,0.2) 0%, rgba(56,189,248,0.3) 100%)', // Enhanced glowing border
+        padding: 4, // creates the border effect
+        boxShadow: '0 10px 30px rgba(0,0,0,0.5)',
       },
-      children: bulletElements,
+      children: [
+        {
+          type: 'div',
+          props: {
+            style: { display: 'flex', flexDirection: 'column' as const, borderRadius: 16, overflow: 'hidden' },
+            children: heroCardChildren
+          }
+        }
+      ],
+    },
+  });
+
+  // 3. Bullet points card
+  contentChildren.push({
+    type: 'div',
+    props: {
+      style: {
+        display: 'flex',
+        marginTop: 20,
+        width: '100%',
+        borderRadius: 20,
+        background: 'linear-gradient(135deg, rgba(255,255,255,0.15) 0%, rgba(255,255,255,0.02) 100%)', // gradient border
+        padding: 2,
+        position: 'relative' as const,
+      },
+      children: [
+        // Decorator circle on top-left of the bullet card
+        {
+          type: 'div',
+          props: {
+            style: { display: 'flex', position: 'absolute' as const, top: -24, left: 60, width: 48, height: 48, borderRadius: 24, background: '#38BDF8', opacity: 0.9 },
+            children: [],
+          }
+        },
+        {
+          type: 'div',
+          props: {
+            style: { display: 'flex', flexDirection: 'column' as const, width: '100%', padding: '36px 36px', borderRadius: 18, background: 'rgba(15,23,42,0.8)' },
+            children: bulletElements,
+          }
+        }
+      ],
     },
   });
 
@@ -340,7 +372,7 @@ function buildPosterVdom(
       children: [{
         type: 'div',
         props: {
-          style: { fontSize: 14, fontWeight: 400, color: '#64748B', lineHeight: 1.5 },
+          style: { display: 'flex', fontSize: 14, fontWeight: 400, color: '#64748B', lineHeight: 1.5 },
           children: footerMsg,
         },
       }],
@@ -373,9 +405,9 @@ function buildPosterVdom(
       style: {
         display: 'flex',
         position: 'absolute' as const,
-        top: 50, right: 50,
-        width: 80, height: 80,
-        borderRadius: 40,
+        top: 40, right: 30, // Pushed outward
+        width: 60, height: 60, // Made slightly smaller
+        borderRadius: 30,
         background: 'linear-gradient(135deg, #38BDF8, #06B6D4)',
         opacity: 0.9,
       },
@@ -389,9 +421,9 @@ function buildPosterVdom(
       style: {
         display: 'flex',
         position: 'absolute' as const,
-        top: 58, right: 58,
-        width: 64, height: 64,
-        borderRadius: 32,
+        top: 46, right: 36,
+        width: 48, height: 48,
+        borderRadius: 24,
         border: '4px solid rgba(255,255,255,0.25)',
       },
       children: [],
