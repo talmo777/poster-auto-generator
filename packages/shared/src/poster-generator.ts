@@ -25,7 +25,6 @@ let cachedFonts: { [weight: number]: ArrayBuffer } = {};
 
 function getFontUrls(weight: 400 | 700 | 900): string[] {
   return [
-    `https://cdn.jsdelivr.net/fontsource/fonts/noto-sans-kr@latest/korean-${weight}-normal.woff2`,
     `https://cdn.jsdelivr.net/npm/@fontsource/noto-sans-kr@5.0.12/files/noto-sans-kr-korean-${weight}-normal.woff`,
     `https://unpkg.com/@fontsource/noto-sans-kr@5.0.12/files/noto-sans-kr-korean-${weight}-normal.woff`,
   ];
