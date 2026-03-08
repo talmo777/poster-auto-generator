@@ -128,25 +128,25 @@ function buildPosterVdom(
   const locationLine = materials.location ? `설치장소 : ${materials.location}` : '';
   const contactLine = materials.contact ? `담당자 : ${materials.contact}` : '';
   const priceLine = materials.priceInfo || '';
-  const footerMsg = copy.supplementary || '맞춤의약연구원에서 사용요금을 내고 사용 가능하며, 예약은 맞춤의약연구원 회원가입 후 예약하여 담당교수님 확인 완료 후 사용 가능합니다.';
+  const footerMsg = copy.supplementary || '맞춤의약연구원에서 사용요금을 내고 사용 가능하며, 의뢰 가격은 홈페이지를 참고해 주시기 바랍니다. 예약은 연구원 회원가입 및 담당교수 승인 후 가능합니다.';
 
   // Build bullet elements
   const bulletElements = copy.bullets.slice(0, 3).map((b, i) => ({
     type: 'div',
     props: {
-      style: { display: 'flex', alignItems: 'flex-start', marginBottom: i === 2 ? 0 : 20 },
+      style: { display: 'flex', alignItems: 'flex-start', marginBottom: i === 2 ? 0 : 24 }, // Increased margin
       children: [
         {
           type: 'div',
           props: {
-            style: { display: 'flex', width: 14, height: 14, borderRadius: 7, backgroundColor: '#38BDF8', flexShrink: 0, marginTop: 8 },
+            style: { display: 'flex', width: 16, height: 16, borderRadius: 8, backgroundColor: '#38BDF8', flexShrink: 0, marginTop: 10 }, // Slightly larger dot
             children: [],
           },
         },
         {
           type: 'div',
           props: {
-            style: { display: 'flex', fontSize: 22, fontWeight: 700, color: 'white', marginLeft: 16, flex: 1, lineHeight: 1.5, wordBreak: 'keep-all' as const },
+            style: { display: 'flex', fontSize: 26, fontWeight: 700, color: 'white', marginLeft: 16, flex: 1, lineHeight: 1.5, wordBreak: 'keep-all' as const }, // Enlarged text
             children: b,
           },
         },
@@ -175,15 +175,11 @@ function buildPosterVdom(
   const contactChildren: any[] = [];
   if (locationLine) contactChildren.push({
     type: 'div',
-    props: { style: { display: 'flex', fontSize: 18, fontWeight: 700, color: '#F8FAFC', lineHeight: 1.5, wordBreak: 'keep-all' as const }, children: locationLine },
+    props: { style: { display: 'flex', fontSize: 24, fontWeight: 700, color: '#F8FAFC', lineHeight: 1.5, wordBreak: 'keep-all' as const }, children: locationLine },
   });
   if (contactLine) contactChildren.push({
     type: 'div',
-    props: { style: { display: 'flex', fontSize: 18, fontWeight: 700, color: '#F8FAFC', marginTop: 4, lineHeight: 1.5, wordBreak: 'keep-all' as const }, children: contactLine },
-  });
-  if (priceLine) contactChildren.push({
-    type: 'div',
-    props: { style: { display: 'flex', fontSize: 18, fontWeight: 700, color: '#F8FAFC', marginTop: 4, lineHeight: 1.5, wordBreak: 'keep-all' as const }, children: priceLine },
+    props: { style: { display: 'flex', fontSize: 24, fontWeight: 700, color: '#F8FAFC', marginTop: 6, lineHeight: 1.5, wordBreak: 'keep-all' as const }, children: contactLine },
   });
 
   // QR element
@@ -250,14 +246,14 @@ function buildPosterVdom(
       style: {
         display: 'flex',
         width: '100%',
-        height: 400, // Made taller so 4:3 images don't look squished, leaving no ugly white boxes
-        background: 'rgba(255,255,255,0.03)', // Subtle transparent instead of harsh white
+        height: 380, // Taller image area
+        background: 'rgba(255,255,255,0.03)',
         borderTopLeftRadius: 18,
         borderTopRightRadius: 18,
         borderBottomLeftRadius: specText ? 0 : 18,
         borderBottomRightRadius: specText ? 0 : 18,
         overflow: 'hidden',
-        padding: 10, // Slight padding around the image inside the card
+        padding: 10,
       },
       children: [heroElement],
     },
@@ -272,14 +268,14 @@ function buildPosterVdom(
           width: '100%',
           alignItems: 'center',
           justifyContent: 'center',
-          padding: '16px 24px',
-          background: 'rgba(226, 232, 240, 0.95)', // light grey bar
-          borderBottomLeftRadius: 18,
-          borderBottomRightRadius: 18,
+          padding: '24px 24px',
+          background: 'rgba(255,255,255,0.75)', // The reference shows it as a solid but slightly translucent light grey/white area, distinctly different from the image bg
+          borderBottomLeftRadius: 16,
+          borderBottomRightRadius: 16,
         },
         children: [{
           type: 'div',
-          props: { style: { display: 'flex', fontSize: 16, fontWeight: 700, color: '#1E293B', textAlign: 'center' as const, lineHeight: 1.5, wordBreak: 'keep-all' as const }, children: specText },
+          props: { style: { display: 'flex', fontSize: 18, fontWeight: 700, color: '#0F172A', textAlign: 'center' as const, lineHeight: 1.5, wordBreak: 'keep-all' as const }, children: specText },
         }],
       },
     });
@@ -302,6 +298,7 @@ function buildPosterVdom(
         {
           type: 'div',
           props: {
+            // Inner radius slightly smaller for perfect fit. We need the bottom to match if there is spec text.
             style: { display: 'flex', flexDirection: 'column' as const, borderRadius: 16, overflow: 'hidden' },
             children: heroCardChildren
           }
@@ -316,7 +313,7 @@ function buildPosterVdom(
     props: {
       style: {
         display: 'flex',
-        marginTop: 20,
+        marginTop: 120,
         width: '100%',
         borderRadius: 20,
         background: 'linear-gradient(135deg, rgba(56,189,248,0.3) 0%, rgba(255,255,255,0.05) 100%)', // gradient border
@@ -328,7 +325,7 @@ function buildPosterVdom(
         {
           type: 'div',
           props: {
-            style: { display: 'flex', position: 'absolute' as const, top: -35, left: 40, width: 70, height: 70, borderRadius: 35, background: '#38BDF8', opacity: 0.8 },
+            style: { display: 'flex', position: 'absolute' as const, top: -20, left: 30, width: 60, height: 60, borderRadius: 30, background: '#38BDF8', opacity: 0.9 },
             children: [],
           }
         },
@@ -373,7 +370,7 @@ function buildPosterVdom(
       children: [{
         type: 'div',
         props: {
-          style: { display: 'flex', fontSize: 14, fontWeight: 400, color: '#64748B', lineHeight: 1.5 },
+          style: { display: 'flex', fontSize: 18, fontWeight: 400, color: '#94A3B8', lineHeight: 1.5 }, // Enlarged footer message
           children: footerMsg,
         },
       }],
@@ -393,24 +390,24 @@ function buildPosterVdom(
         display: 'flex',
         position: 'absolute' as const,
         top: 0, left: 0, right: 0, bottom: 0,
-        background: 'linear-gradient(135deg, rgba(15,23,42,0.8), rgba(2,6,23,0.9), rgba(15,23,42,0.8))',
+        background: 'linear-gradient(135deg, rgba(15,23,42,0.9), rgba(2,6,23,0.95), rgba(15,23,42,0.9))',
       },
       children: [],
     },
   });
 
-  // 2. Top-right accent circle (mint/cyan) - large and bleeding off edge
+  // 2. Top-right accent circle (mint/cyan) - matching the reference positioning
   decorativeChildren.push({
     type: 'div',
     props: {
       style: {
         display: 'flex',
         position: 'absolute' as const,
-        top: -40, right: -40,
-        width: 160, height: 160,
-        borderRadius: 80,
+        top: 40, right: 30,
+        width: 80, height: 80,
+        borderRadius: 40,
         background: 'linear-gradient(135deg, #38BDF8, #06B6D4)',
-        opacity: 0.8,
+        opacity: 0.9,
       },
       children: [],
     },
@@ -422,27 +419,27 @@ function buildPosterVdom(
       style: {
         display: 'flex',
         position: 'absolute' as const,
-        top: -24, right: -24,
-        width: 128, height: 128,
-        borderRadius: 64,
-        border: '6px solid rgba(255,255,255,0.25)',
+        top: 48, right: 38,
+        width: 64, height: 64,
+        borderRadius: 32,
+        border: '4px solid rgba(255,255,255,0.25)',
       },
       children: [],
     },
   });
 
-  // 3. Bottom-left small circle - removing the awkward dark blue one and making it subtle
+  // 3. Bottom-left small circle
   decorativeChildren.push({
     type: 'div',
     props: {
       style: {
         display: 'flex',
         position: 'absolute' as const,
-        bottom: 80, left: -20,
-        width: 80, height: 80,
-        borderRadius: 40,
-        background: 'rgba(56,189,248,0.08)', // very subtle
-        border: '2px solid rgba(56,189,248,0.15)',
+        bottom: 80, left: -40,
+        width: 100, height: 100,
+        borderRadius: 50,
+        background: 'rgba(56,189,248,0.1)',
+        border: '1px solid rgba(56,189,248,0.25)',
       },
       children: [],
     },
