@@ -17,6 +17,11 @@ const QR_DARK_COLOR = '#0F172A';
 const QR_LIGHT_COLOR = '#FFFFFF';
 const MIN_FONT_FILE_SIZE = 50_000;
 
+const DEFAULT_ORG_LABEL = '한양맞춤의약연구원 연구장비 공동활용';
+const DEFAULT_TITLE = '첨단 연구 장비';
+const DEFAULT_SUBTITLE = '정밀 분석 · 실험 지원';
+const DEFAULT_NOTE = '홈페이지에서 장비 상세 정보와 예약 안내를 확인할 수 있습니다.';
+
 export function generateSeed(): number {
   return Math.floor(Math.random() * 2147483647);
 }
@@ -116,14 +121,16 @@ async function fetchImageAsBase64(imageUrl: string | undefined): Promise<string 
 function compactText(value: string | undefined | null): string {
   if (!value) return '';
   return value
+    .replace(/\n+/g, ' ')
     .replace(/[\uFFFD□]/g, '')
-    .replace(/[|｜]+/g, '|')
     .replace(/[“”]/g, '"')
     .replace(/[‘’]/g, "'")
+    .replace(/[|｜]+/g, '|')
+    .replace(/[•·]+/g, '·')
     .replace(/\s+/g, ' ')
     .replace(/\s*\|\s*/g, ' | ')
-    .replace(/\s*,\s*/g, ', ')
     .replace(/\s*\/\s*/g, ' / ')
+    .replace(/\s*,\s*/g, ', ')
     .trim();
 }
 
@@ -145,10 +152,16 @@ function fixBrokenUnits(value: string): string {
 function isJunkText(value: string | undefined | null): boolean {
   const v = compactText(value).toLowerCase();
   if (!v) return true;
-  if (['-', '--', 'n/a', 'na', 'null', 'undefined', '없음'].includes(v)) return true;
-  if (v.includes('업데이트 예정')) return true;
-  if (v === '(박미나)' || v === '박미나') return true;
-  if (v === '|') return true;
+
+  const normalized = v.replace(/\s+/g, '');
+  const directJunk = [
+    '-', '--', '---', '|', '·', '.', 'n/a', 'na', 'none', 'null', 'undefined', '없음',
+    '미정', '준비중', '업데이트예정', '추후업데이트', 'tbd', 'todo', '미입력', '정보없음',
+  ];
+
+  if (directJunk.includes(v) || directJunk.includes(normalized)) return true;
+  if (v.includes('업데이트 예정') || v.includes('미정') || v.includes('추후 안내')) return true;
+
   return false;
 }
 
@@ -166,99 +179,112 @@ function truncateText(value: string, maxLength: number): string {
 function dedupeParts(values: Array<string | undefined | null>): string[] {
   const seen = new Set<string>();
   const results: string[] = [];
+
   for (const raw of values) {
     const value = cleanDisplayText(raw);
     if (!value) continue;
+
     const key = value.toLowerCase();
     if (seen.has(key)) continue;
     seen.add(key);
     results.push(value);
   }
+
   return results;
 }
 
-function splitSpecText(value: string | undefined | null): string[] {
-  return cleanDisplayText(value)
-    .split(/\s*\|\s*|\s*\/\s*|,\s*/)
+function splitParts(values: Array<string | undefined | null>): string[] {
+  const merged = dedupeParts(values).join(' | ');
+  return merged
+    .split(/\s*\|\s*|\s*\/\s*|\s*,\s*/)
     .map((part) => cleanDisplayText(part))
     .filter(Boolean);
 }
 
-function buildEyebrow(copy: PosterCopy, materials: PosterMaterials): string {
-  const candidates = dedupeParts([
-    materials.category,
-    copy.cta,
-    materials.keywords,
-    '한양맞춤의약연구원 보유 장비',
-  ]);
-  return truncateText(candidates[0] || '한양맞춤의약연구원 보유 장비', 22);
-}
-
-function buildDisplayTitle(copy: PosterCopy, materials: PosterMaterials): string {
+function pickTitle(copy: PosterCopy, materials: PosterMaterials): string {
   const candidates = dedupeParts([
     materials.equipmentName,
     copy.headline,
     materials.modelNumber,
+    materials.category,
   ]);
-  const raw = candidates[0] || '첨단 연구 장비';
-  return truncateText(raw, 30);
+
+  return truncateText(candidates[0] || DEFAULT_TITLE, 34);
 }
 
-function buildDisplaySubtitle(copy: PosterCopy, materials: PosterMaterials): string {
-  const parts = dedupeParts([
-    materials.manufacturer,
-    materials.modelNumber,
-    copy.subheadline,
+function pickEyebrow(copy: PosterCopy, materials: PosterMaterials): string {
+  const candidates = dedupeParts([
+    copy.cta,
+    materials.category,
+    DEFAULT_ORG_LABEL,
   ]);
-  const line = parts.join(' · ');
-  return truncateText(line, 56);
+  return truncateText(candidates[0] || DEFAULT_ORG_LABEL, 30);
 }
 
-function buildValueBadges(materials: PosterMaterials): string[] {
-  const badges = dedupeParts([
-    materials.manufacturer,
-    materials.modelNumber,
-    ...splitSpecText(materials.specification).slice(0, 6),
-  ]);
+function pickSubMeta(materials: PosterMaterials): string {
+  const parts = dedupeParts([materials.manufacturer, materials.modelNumber, materials.category]);
+  return truncateText(parts.join(' · ') || DEFAULT_SUBTITLE, 68);
+}
 
-  return badges
-    .map((badge) => truncateText(badge, 24))
+function buildKeyPoints(copy: PosterCopy, materials: PosterMaterials): string[] {
+  const fromCopy = copy.bullets
+    .map((v) => cleanDisplayText(v))
     .filter(Boolean)
-    .slice(0, 3);
-}
+    .map((v) => truncateText(v, 46));
 
-function normalizeBullets(copy: PosterCopy, materials: PosterMaterials): string[] {
-  const explicit = copy.bullets
-    .map((item) => cleanDisplayText(item))
-    .filter(Boolean)
-    .map((item) => truncateText(item, 28));
+  const fromSpecs = splitParts([materials.specification, materials.keywords])
+    .map((v) => truncateText(v, 38));
 
-  const fallback = splitSpecText(materials.specification)
-    .map((item) => truncateText(item, 28));
+  const merged = dedupeParts([...fromCopy, ...fromSpecs]).slice(0, 3);
 
-  const merged = dedupeParts([...explicit, ...fallback]);
-  const selected = merged.slice(0, 3);
+  const fallback = [
+    '고가 연구장비를 합리적인 방식으로 공동 활용',
+    '전문 인프라 기반의 정밀 분석 및 실험 지원',
+    '외부 기관·기업·연구실 대상 예약형 이용 가능',
+  ];
 
-  while (selected.length < 3) {
-    selected.push(['정밀 분석 지원', '연구 효율 향상', '전문 장비 활용'][selected.length]);
+  while (merged.length < 3) {
+    merged.push(fallback[merged.length]);
   }
+
+  return merged;
+}
+
+function pickSpecBadges(materials: PosterMaterials): string[] {
+  const parts = splitParts([
+    materials.specification,
+    materials.keywords,
+    materials.manufacturer,
+    materials.modelNumber,
+  ])
+    .map((v) => truncateText(v, 20))
+    .filter((v) => v.length >= 2 && v.length <= 20);
+
+  const compact = parts.filter((v) => v.length <= 14);
+  const selected = dedupeParts([...compact, ...parts]).slice(0, 3);
 
   return selected;
 }
 
-function buildFooterLine(prefix: string, value: string | undefined | null, maxLen: number): string {
-  const cleaned = cleanDisplayText(value);
-  if (!cleaned) return '';
-  return truncateText(`${prefix} ${cleaned}`, maxLen);
+function buildFooterContact(materials: PosterMaterials): string[] {
+  const lines = dedupeParts([
+    materials.contact,
+    materials.location,
+    materials.priceInfo,
+  ]).map((v) => truncateText(v, 52));
+
+  return lines.slice(0, 3);
 }
 
 function buildFooterNote(copy: PosterCopy, materials: PosterMaterials): string {
   const candidates = dedupeParts([
     copy.supplementary,
     materials.priceInfo,
-    '홈페이지에서 장비 상세 정보와 예약 안내를 확인할 수 있습니다.',
+    '장비 이용 가능 여부 및 일정은 문의 후 확정됩니다.',
+    DEFAULT_NOTE,
   ]);
-  return truncateText(candidates[0] || '홈페이지에서 장비 상세 정보와 예약 안내를 확인할 수 있습니다.', 72);
+
+  return truncateText(candidates[0] || DEFAULT_NOTE, 86);
 }
 
 function buildPosterVdom(
@@ -271,34 +297,27 @@ function buildPosterVdom(
 ) {
   const isStory = height > 1600;
 
-  const eyebrow = buildEyebrow(copy, materials);
-  const title = buildDisplayTitle(copy, materials);
-  const subtitle = buildDisplaySubtitle(copy, materials);
-  const badges = buildValueBadges(materials);
-  const bullets = normalizeBullets(copy, materials);
-
-  const locationLine = buildFooterLine('설치장소', materials.location, 34);
-  const contactLine = buildFooterLine('문의 및 예약', materials.contact, 54);
+  const eyebrow = pickEyebrow(copy, materials);
+  const title = pickTitle(copy, materials);
+  const subMeta = pickSubMeta(materials);
+  const keyPoints = buildKeyPoints(copy, materials);
+  const specBadges = pickSpecBadges(materials);
+  const footerContacts = buildFooterContact(materials);
   const footerNote = buildFooterNote(copy, materials);
 
-  const titleLength = title.length;
-  const titleFontSize = isStory ? (titleLength >= 24 ? 66 : 74) : (titleLength >= 24 ? 54 : 62);
-  const titleLineHeight = titleLength >= 24 ? 1.03 : 1.08;
-  const heroHeight = isStory ? 650 : 430;
-  const footerQrSize = isStory ? 132 : 108;
-  const outerPaddingX = isStory ? 56 : 52;
-  const outerPaddingY = isStory ? 58 : 46;
-  const bulletFontSize = isStory ? 28 : 22;
-  const bulletDotSize = isStory ? 13 : 11;
-  const bulletGap = isStory ? 24 : 16;
+  const outerPaddingX = isStory ? 56 : 50;
+  const outerPaddingY = isStory ? 58 : 44;
+  const heroHeight = isStory ? 730 : 440;
+  const qrSize = isStory ? 136 : 110;
 
-  const bulletElements = bullets.map((bullet, index) => ({
+  const keyPointElements = keyPoints.map((point, index) => ({
     type: 'div',
     props: {
       style: {
         display: 'flex',
+        width: '100%',
         alignItems: 'flex-start',
-        marginBottom: index === bullets.length - 1 ? 0 : bulletGap,
+        marginBottom: index === keyPoints.length - 1 ? 0 : (isStory ? 18 : 14),
       },
       children: [
         {
@@ -306,13 +325,13 @@ function buildPosterVdom(
           props: {
             style: {
               display: 'flex',
-              width: bulletDotSize,
-              height: bulletDotSize,
+              width: isStory ? 13 : 11,
+              height: isStory ? 13 : 11,
               borderRadius: 999,
-              background: 'linear-gradient(135deg, #7C3AED, #C084FC)',
-              marginTop: isStory ? 10 : 9,
+              marginTop: isStory ? 9 : 8,
               flexShrink: 0,
-              boxShadow: '0 0 0 5px rgba(168,85,247,0.16)',
+              background: 'linear-gradient(135deg, #22D3EE, #818CF8)',
+              boxShadow: '0 0 0 4px rgba(34,211,238,0.18)',
             },
             children: [],
           },
@@ -322,44 +341,61 @@ function buildPosterVdom(
           props: {
             style: {
               display: 'flex',
-              marginLeft: 16,
-              color: '#F8FAFC',
-              fontSize: bulletFontSize,
-              fontWeight: 800,
-              lineHeight: 1.35,
-              wordBreak: 'keep-all' as const,
+              marginLeft: 14,
+              color: '#E2E8F0',
+              fontSize: isStory ? 27 : 20,
+              fontWeight: 700,
+              lineHeight: 1.34,
               flex: 1,
+              wordBreak: 'keep-all' as const,
             },
-            children: bullet,
+            children: point,
           },
         },
       ],
     },
   }));
 
-  const badgeElements = badges.map((badge) => ({
+  const badgeElements = specBadges.map((badge) => ({
     type: 'div',
     props: {
       style: {
         display: 'flex',
-        padding: isStory ? '12px 20px' : '10px 18px',
+        alignItems: 'center',
+        padding: isStory ? '10px 16px' : '8px 14px',
         borderRadius: 999,
-        background: 'rgba(255,255,255,0.97)',
-        color: '#0F172A',
-        fontSize: isStory ? 18 : 15,
-        fontWeight: 800,
-        marginRight: 10,
-        marginBottom: 10,
-        border: '1px solid rgba(148,163,184,0.24)',
+        marginRight: 8,
+        marginBottom: 8,
+        background: 'rgba(148,163,184,0.14)',
+        border: '1px solid rgba(148,163,184,0.34)',
+        color: '#E2E8F0',
+        fontSize: isStory ? 16 : 13,
+        fontWeight: 700,
       },
       children: badge,
     },
   }));
 
-  const heroCardChildren: any[] = [];
+  const contactElements = footerContacts.map((line, index) => ({
+    type: 'div',
+    props: {
+      style: {
+        display: 'flex',
+        color: '#F8FAFC',
+        fontSize: isStory ? 20 : 16,
+        fontWeight: 700,
+        lineHeight: 1.35,
+        marginTop: index === 0 ? 0 : 6,
+        wordBreak: 'keep-all' as const,
+      },
+      children: line,
+    },
+  }));
+
+  const heroOverlayChildren: any[] = [];
 
   if (heroBase64) {
-    heroCardChildren.push({
+    heroOverlayChildren.push({
       type: 'img',
       props: {
         src: heroBase64,
@@ -369,13 +405,14 @@ function buildPosterVdom(
           width: '100%',
           height: '100%',
           objectFit: 'cover' as const,
-          opacity: 0.18,
+          opacity: 0.12,
+          filter: 'blur(18px)',
         },
       },
     });
   }
 
-  heroCardChildren.push({
+  heroOverlayChildren.push({
     type: 'div',
     props: {
       style: {
@@ -383,13 +420,13 @@ function buildPosterVdom(
         position: 'relative' as const,
         width: '100%',
         height: '100%',
-        borderRadius: 30,
-        background: 'linear-gradient(180deg, rgba(255,255,255,0.96) 0%, rgba(241,245,249,0.96) 100%)',
-        border: '1px solid rgba(255,255,255,0.55)',
+        borderRadius: 34,
         overflow: 'hidden',
         alignItems: 'center',
         justifyContent: 'center',
-        boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.8)',
+        background: 'radial-gradient(circle at 50% 35%, rgba(255,255,255,0.98) 0%, rgba(241,245,249,0.96) 45%, rgba(203,213,225,0.94) 100%)',
+        border: '1px solid rgba(255,255,255,0.75)',
+        boxShadow: '0 22px 50px rgba(2,6,23,0.24), inset 0 1px 0 rgba(255,255,255,0.9)',
       },
       children: heroBase64
         ? [{
@@ -400,7 +437,7 @@ function buildPosterVdom(
                 width: '100%',
                 height: '100%',
                 objectFit: 'contain' as const,
-                padding: isStory ? '28px' : '24px',
+                padding: isStory ? '36px 34px' : '28px 28px',
               },
             },
           }]
@@ -419,379 +456,298 @@ function buildPosterVdom(
     },
   });
 
-  const footerLeftChildren: any[] = [];
-  if (locationLine) {
-    footerLeftChildren.push({
-      type: 'div',
-      props: {
-        style: {
-          display: 'flex',
-          color: '#F8FAFC',
-          fontSize: isStory ? 24 : 18,
-          fontWeight: 800,
-          lineHeight: 1.35,
-          wordBreak: 'keep-all' as const,
-        },
-        children: locationLine,
-      },
-    });
-  }
-  if (contactLine) {
-    footerLeftChildren.push({
-      type: 'div',
-      props: {
-        style: {
-          display: 'flex',
-          color: '#F8FAFC',
-          fontSize: isStory ? 24 : 18,
-          fontWeight: 800,
-          lineHeight: 1.35,
-          marginTop: 4,
-          wordBreak: 'keep-all' as const,
-        },
-        children: contactLine,
-      },
-    });
-  }
-  footerLeftChildren.push({
-    type: 'div',
-    props: {
-      style: {
-        display: 'flex',
-        color: '#94A3B8',
-        fontSize: isStory ? 16 : 13,
-        fontWeight: 400,
-        lineHeight: 1.35,
-        marginTop: 10,
-        maxWidth: qrBase64 ? '92%' : '100%',
-      },
-      children: footerNote,
-    },
-  });
-
-  const qrElement = qrBase64 ? {
-    type: 'div',
-    props: {
-      style: {
-        display: 'flex',
-        flexDirection: 'column' as const,
-        alignItems: 'center',
-        marginLeft: 22,
-        flexShrink: 0,
-      },
-      children: [
-        {
-          type: 'div',
-          props: {
-            style: {
-              display: 'flex',
-              padding: 10,
-              background: 'rgba(255,255,255,0.98)',
-              borderRadius: 18,
-              border: '1px solid rgba(196,181,253,0.48)',
-              boxShadow: '0 12px 30px rgba(2,6,23,0.24)',
-            },
-            children: [{
-              type: 'img',
-              props: { src: qrBase64, width: footerQrSize, height: footerQrSize },
-            }],
-          },
-        },
-        {
-          type: 'div',
-          props: {
-            style: {
-              display: 'flex',
-              fontSize: isStory ? 16 : 14,
-              fontWeight: 700,
-              color: '#CBD5E1',
-              marginTop: 8,
-            },
-            children: '홈페이지 바로가기',
-          },
-        },
-      ],
-    },
-  } : null;
-
-  const children: any[] = [];
-
-  children.push({
-    type: 'div',
-    props: {
-      style: {
-        display: 'flex',
-        position: 'absolute' as const,
-        inset: 0,
-        background: 'linear-gradient(135deg, rgba(2,6,23,0.94) 0%, rgba(7,16,56,0.94) 45%, rgba(1,8,26,0.97) 100%)',
-      },
-      children: [],
-    },
-  });
-
-  children.push({
-    type: 'div',
-    props: {
-      style: {
-        display: 'flex',
-        position: 'absolute' as const,
-        top: -80,
-        right: -120,
-        width: isStory ? 520 : 420,
-        height: isStory ? 280 : 240,
-        transform: 'rotate(24deg)',
-        background: 'linear-gradient(135deg, rgba(56,189,248,0.10), rgba(168,85,247,0.18))',
-      },
-      children: [],
-    },
-  });
-
-  children.push({
-    type: 'div',
-    props: {
-      style: {
-        display: 'flex',
-        position: 'absolute' as const,
-        top: 24,
-        left: 24,
-        right: 24,
-        bottom: 24,
-        borderRadius: 30,
-        border: '1px solid rgba(148,163,184,0.20)',
-      },
-      children: [],
-    },
-  });
-
-  children.push({
-    type: 'div',
-    props: {
-      style: {
-        display: 'flex',
-        position: 'absolute' as const,
-        top: 40,
-        right: 36,
-        width: isStory ? 76 : 68,
-        height: isStory ? 76 : 68,
-        borderRadius: 999,
-        background: 'linear-gradient(135deg, rgba(168,85,247,0.95), rgba(216,180,254,0.92))',
-      },
-      children: [],
-    },
-  });
-
-  children.push({
-    type: 'div',
-    props: {
-      style: {
-        display: 'flex',
-        position: 'absolute' as const,
-        top: 49,
-        right: 45,
-        width: isStory ? 58 : 50,
-        height: isStory ? 58 : 50,
-        borderRadius: 999,
-        border: '3px solid rgba(255,255,255,0.20)',
-      },
-      children: [],
-    },
-  });
-
-  const contentChildren: any[] = [];
-
-  contentChildren.push({
-    type: 'div',
-    props: {
-      style: {
-        display: 'flex',
-        alignItems: 'center',
-        alignSelf: 'center',
-        padding: isStory ? '10px 18px' : '8px 16px',
-        borderRadius: 999,
-        background: 'rgba(15,23,42,0.52)',
-        border: '1px solid rgba(148,163,184,0.22)',
-        color: '#C4B5FD',
-        fontSize: isStory ? 16 : 13,
-        fontWeight: 800,
-        letterSpacing: 0.4,
-      },
-      children: eyebrow,
-    },
-  });
-
-  contentChildren.push({
-    type: 'div',
-    props: {
-      style: {
-        display: 'flex',
-        marginTop: 18,
-        color: '#FFFFFF',
-        fontSize: titleFontSize,
-        fontWeight: 900,
-        lineHeight: titleLineHeight,
-        textAlign: 'center' as const,
-        justifyContent: 'center',
-        letterSpacing: -1.8,
-        wordBreak: 'keep-all' as const,
-      },
-      children: title,
-    },
-  });
-
-  if (subtitle) {
-    contentChildren.push({
-      type: 'div',
-      props: {
-        style: {
-          display: 'flex',
-          marginTop: 10,
-          color: '#CBD5E1',
-          fontSize: isStory ? 20 : 18,
-          fontWeight: 500,
-          lineHeight: 1.35,
-          textAlign: 'center' as const,
-          justifyContent: 'center',
-          wordBreak: 'keep-all' as const,
-          padding: '0 40px',
-        },
-        children: subtitle,
-      },
-    });
-  }
-
-  contentChildren.push({
-    type: 'div',
-    props: {
-      style: {
-        display: 'flex',
-        flexDirection: 'column' as const,
-        width: '100%',
-        marginTop: isStory ? 26 : 24,
-        padding: isStory ? '20px' : '18px',
-        borderRadius: 30,
-        background: 'linear-gradient(180deg, rgba(71,85,105,0.58) 0%, rgba(30,41,59,0.90) 100%)',
-        boxShadow: '0 28px 70px rgba(2,6,23,0.32)',
-      },
-      children: [
-        {
-          type: 'div',
-          props: {
-            style: {
-              display: 'flex',
-              width: '100%',
-              height: heroHeight,
-              position: 'relative' as const,
-              borderRadius: 30,
-              overflow: 'hidden',
-            },
-            children: heroCardChildren,
-          },
-        },
-        ...(badgeElements.length > 0 ? [{
-          type: 'div',
-          props: {
-            style: {
-              display: 'flex',
-              flexWrap: 'wrap' as const,
-              alignItems: 'center',
-              justifyContent: 'center',
-              padding: isStory ? '18px 6px 2px 6px' : '16px 6px 0 6px',
-            },
-            children: badgeElements,
-          },
-        }] : []),
-      ],
-    },
-  });
-
-  contentChildren.push({
-    type: 'div',
-    props: {
-      style: {
-        display: 'flex',
-        marginTop: isStory ? 24 : 22,
-        width: '100%',
-        borderRadius: 26,
-        background: 'rgba(2,6,23,0.54)',
-        border: '1px solid rgba(148,163,184,0.18)',
-        padding: isStory ? '34px 34px' : '28px 30px',
-        boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.04)',
-      },
-      children: [{
+  const qrSection = qrBase64
+    ? {
         type: 'div',
         props: {
           style: {
             display: 'flex',
             flexDirection: 'column' as const,
-            width: '100%',
+            alignItems: 'center',
+            justifyContent: 'center',
+            marginLeft: 18,
+            flexShrink: 0,
           },
-          children: bulletElements,
-        },
-      }],
-    },
-  });
-
-  contentChildren.push({
-    type: 'div',
-    props: {
-      style: {
-        display: 'flex',
-        marginTop: isStory ? 26 : 24,
-        padding: isStory ? '22px 24px' : '18px 20px',
-        borderRadius: 22,
-        background: 'rgba(2,6,23,0.34)',
-        border: '1px solid rgba(148,163,184,0.12)',
-        justifyContent: 'space-between',
-        alignItems: 'flex-end',
-      },
-      children: [
-        {
-          type: 'div',
-          props: {
-            style: {
-              display: 'flex',
-              flexDirection: 'column' as const,
-              flex: 1,
-              minWidth: 0,
-              paddingRight: qrBase64 ? 14 : 0,
+          children: [
+            {
+              type: 'div',
+              props: {
+                style: {
+                  display: 'flex',
+                  padding: 10,
+                  borderRadius: 18,
+                  background: '#FFFFFF',
+                  border: '1px solid rgba(148,163,184,0.35)',
+                },
+                children: [{
+                  type: 'img',
+                  props: {
+                    src: qrBase64,
+                    width: qrSize,
+                    height: qrSize,
+                  },
+                }],
+              },
             },
-            children: footerLeftChildren,
-          },
+            {
+              type: 'div',
+              props: {
+                style: {
+                  display: 'flex',
+                  marginTop: 8,
+                  color: '#CBD5E1',
+                  fontSize: isStory ? 15 : 13,
+                  fontWeight: 700,
+                },
+                children: '예/안내 바로가기',
+              },
+            },
+          ],
         },
-        ...(qrElement ? [qrElement] : []),
-      ],
-    },
-  });
-
-  children.push({
-    type: 'div',
-    props: {
-      style: {
-        display: 'flex',
-        flexDirection: 'column' as const,
-        width: '100%',
-        height: '100%',
-        position: 'relative' as const,
-        zIndex: 10,
-        padding: `${outerPaddingY}px ${outerPaddingX}px ${outerPaddingY}px ${outerPaddingX}px`,
-      },
-      children: contentChildren,
-    },
-  });
+      }
+    : null;
 
   return {
     type: 'div',
     props: {
       style: {
         display: 'flex',
+        position: 'relative' as const,
         width,
         height,
         color: '#FFFFFF',
         fontFamily: 'Noto Sans KR',
-        position: 'relative' as const,
         overflow: 'hidden',
       },
-      children,
+      children: [
+        {
+          type: 'div',
+          props: {
+            style: {
+              display: 'flex',
+              position: 'absolute' as const,
+              inset: 0,
+              background: 'linear-gradient(140deg, rgba(2,6,23,0.94) 0%, rgba(9,16,43,0.92) 46%, rgba(10,16,34,0.96) 100%)',
+            },
+            children: [],
+          },
+        },
+        {
+          type: 'div',
+          props: {
+            style: {
+              display: 'flex',
+              position: 'absolute' as const,
+              top: -120,
+              right: -120,
+              width: isStory ? 660 : 500,
+              height: isStory ? 320 : 260,
+              transform: 'rotate(20deg)',
+              background: 'linear-gradient(135deg, rgba(34,211,238,0.16), rgba(129,140,248,0.16))',
+            },
+            children: [],
+          },
+        },
+        {
+          type: 'div',
+          props: {
+            style: {
+              display: 'flex',
+              position: 'absolute' as const,
+              top: 24,
+              left: 24,
+              right: 24,
+              bottom: 24,
+              borderRadius: 30,
+              border: '1px solid rgba(148,163,184,0.18)',
+            },
+            children: [],
+          },
+        },
+        {
+          type: 'div',
+          props: {
+            style: {
+              display: 'flex',
+              flexDirection: 'column' as const,
+              width: '100%',
+              height: '100%',
+              padding: `${outerPaddingY}px ${outerPaddingX}px`,
+              position: 'relative' as const,
+              zIndex: 4,
+            },
+            children: [
+              {
+                type: 'div',
+                props: {
+                  style: {
+                    display: 'flex',
+                    alignSelf: 'flex-start',
+                    padding: isStory ? '8px 14px' : '6px 12px',
+                    borderRadius: 999,
+                    background: 'rgba(30,41,59,0.7)',
+                    border: '1px solid rgba(148,163,184,0.24)',
+                    color: '#C4B5FD',
+                    fontSize: isStory ? 14 : 12,
+                    fontWeight: 800,
+                    letterSpacing: 0.2,
+                  },
+                  children: eyebrow,
+                },
+              },
+              {
+                type: 'div',
+                props: {
+                  style: {
+                    display: 'flex',
+                    marginTop: isStory ? 18 : 14,
+                    color: '#FFFFFF',
+                    fontSize: isStory ? 78 : 58,
+                    fontWeight: 900,
+                    lineHeight: 1.04,
+                    letterSpacing: -1.6,
+                    wordBreak: 'keep-all' as const,
+                  },
+                  children: title,
+                },
+              },
+              {
+                type: 'div',
+                props: {
+                  style: {
+                    display: 'flex',
+                    marginTop: 10,
+                    color: '#CBD5E1',
+                    fontSize: isStory ? 20 : 16,
+                    fontWeight: 500,
+                    lineHeight: 1.35,
+                    wordBreak: 'keep-all' as const,
+                  },
+                  children: subMeta,
+                },
+              },
+              {
+                type: 'div',
+                props: {
+                  style: {
+                    display: 'flex',
+                    width: '100%',
+                    marginTop: isStory ? 24 : 18,
+                    height: heroHeight,
+                    borderRadius: 34,
+                    overflow: 'hidden',
+                    position: 'relative' as const,
+                    background: 'rgba(15,23,42,0.6)',
+                  },
+                  children: heroOverlayChildren,
+                },
+              },
+              ...(badgeElements.length > 0
+                ? [{
+                    type: 'div',
+                    props: {
+                      style: {
+                        display: 'flex',
+                        flexWrap: 'wrap' as const,
+                        width: '100%',
+                        marginTop: 14,
+                      },
+                      children: badgeElements,
+                    },
+                  }]
+                : []),
+              {
+                type: 'div',
+                props: {
+                  style: {
+                    display: 'flex',
+                    marginTop: isStory ? 18 : 14,
+                    width: '100%',
+                    padding: isStory ? '24px 24px' : '20px 20px',
+                    borderRadius: 24,
+                    background: 'rgba(15,23,42,0.5)',
+                    border: '1px solid rgba(148,163,184,0.18)',
+                  },
+                  children: [{
+                    type: 'div',
+                    props: {
+                      style: {
+                        display: 'flex',
+                        flexDirection: 'column' as const,
+                        width: '100%',
+                      },
+                      children: keyPointElements,
+                    },
+                  }],
+                },
+              },
+              {
+                type: 'div',
+                props: {
+                  style: {
+                    display: 'flex',
+                    width: '100%',
+                    marginTop: 'auto',
+                    padding: isStory ? '20px 22px' : '16px 18px',
+                    borderRadius: 22,
+                    background: 'rgba(2,6,23,0.62)',
+                    border: '1px solid rgba(148,163,184,0.22)',
+                    alignItems: 'flex-end',
+                    justifyContent: 'space-between',
+                  },
+                  children: [
+                    {
+                      type: 'div',
+                      props: {
+                        style: {
+                          display: 'flex',
+                          flexDirection: 'column' as const,
+                          flex: 1,
+                          minWidth: 0,
+                          paddingRight: qrBase64 ? 14 : 0,
+                        },
+                        children: [
+                          {
+                            type: 'div',
+                            props: {
+                              style: {
+                                display: 'flex',
+                                color: '#93C5FD',
+                                fontSize: isStory ? 13 : 11,
+                                fontWeight: 800,
+                                letterSpacing: 0.4,
+                                marginBottom: 6,
+                              },
+                              children: '설치장소 · 문의 · 이용안내',
+                            },
+                          },
+                          ...contactElements,
+                          {
+                            type: 'div',
+                            props: {
+                              style: {
+                                display: 'flex',
+                                marginTop: 8,
+                                color: '#94A3B8',
+                                fontSize: isStory ? 14 : 12,
+                                fontWeight: 400,
+                                lineHeight: 1.35,
+                                maxWidth: qrBase64 ? '92%' : '100%',
+                              },
+                              children: footerNote,
+                            },
+                          },
+                        ],
+                      },
+                    },
+                    ...(qrSection ? [qrSection] : []),
+                  ],
+                },
+              },
+            ],
+          },
+        },
+      ],
     },
   };
 }
